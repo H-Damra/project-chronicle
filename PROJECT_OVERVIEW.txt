@@ -1,0 +1,902 @@
+================================================================================
+TASKLY APP - PROJECT OVERVIEW
+================================================================================
+
+PROJECT SUMMARY
+---------------
+Name: TasklyApp
+Version: 1.0.0
+Platform: React Native (Expo)
+Purpose: A task management mobile application with advanced animations, timeline
+         visualization, progress tracking, and date-based task filtering.
+
+TECHNOLOGY STACK
+----------------
+- React Native 0.81.4
+- Expo SDK ~54.0.9
+- React Navigation (Stack + Material Top Tabs)
+- React Native Reanimated v4.1.0 (Animations)
+- React Native Gesture Handler (Touch interactions)
+- React Context API (State management)
+- React Native DateTimePicker (Date/time selection)
+- Expo Linear Gradient & Blur
+- React Native SVG
+- Google Fonts (Lexend family)
+
+================================================================================
+PROJECT STRUCTURE
+================================================================================
+
+TasklyApp/
+├── App.js                          # Root component with TaskProvider
+├── index.js                        # Entry point
+├── app.json                        # Expo configuration
+├── package.json                    # Dependencies
+├── assets/                         # Images, icons, fonts
+└── src/
+    ├── navigation/
+    │   └── AppNavigator.js        # Stack + Tab navigation setup
+    ├── contexts/
+    │   ├── TaskContext.js         # Global task state management
+    │   └── ScrollContext.js       # Scroll state management
+    ├── screens/
+    │   ├── TasksScreen.js         # Main home screen (fully implemented)
+    │   ├── AddTaskScreen.js       # Task creation modal (fully implemented)
+    │   ├── TaskDetailScreen.js    # Task detail view (fully implemented)
+    │   ├── ProjectsScreen.js      # Projects tab (placeholder)
+    │   ├── CalendarScreen.js      # Calendar tab (ready for implementation)
+    │   └── MarketplaceScreen.js   # Profile tab (placeholder)
+    ├── components/
+    │   ├── navigation/
+    │   │   └── BottomNavigation.js      # Custom bottom nav bar
+    │   ├── tasks/
+    │   │   └── TaskCard.js              # Task item with animations
+    │   └── common/
+    │       ├── DottedBackground.js      # Dotted pattern background
+    │       ├── TopGradientOverlay.js    # Gradient overlay effect
+    │       ├── ProgressRing.js          # Circular progress indicator
+    │       ├── Timeline.js              # Chronological task timeline
+    │       └── SectionHeader.js         # Section title with divider
+    └── styles/
+        └── colors.js                     # Color palette constants
+
+================================================================================
+CORE FILES DETAILED DESCRIPTION
+================================================================================
+
+ROOT FILES
+----------
+
+index.js
+- Registers the root component with Expo
+- Entry point for the entire application
+
+App.js
+- Wraps app in GestureHandlerRootView for gesture support
+- Wraps app in TaskProvider for global task state
+- Renders AppNavigator for navigation
+
+app.json
+- Expo configuration file
+- Defines app name, version, splash screen, icons
+- Platform-specific settings (iOS, Android, Web)
+- Enables new architecture and edge-to-edge on Android
+
+package.json
+- Lists all dependencies and their versions
+- Defines npm scripts (start, android, ios, web)
+- Key dependencies: expo, react-native, react-navigation, reanimated
+
+================================================================================
+NAVIGATION
+================================================================================
+
+src/navigation/AppNavigator.js
+- Uses Stack Navigator wrapping Material Top Tab Navigator
+- Stack Navigator enables modal presentations (AddTask, TaskDetail)
+- Bottom tab navigation with 4 tabs:
+  * Home (TasksScreen)
+  * Projects (ProjectsScreen)
+  * Stats (CalendarScreen - calendar icon in nav)
+  * Profile (MarketplaceScreen)
+- Custom tab bar component (BottomNavigation)
+- AddTask screen presented as modal (slides up from bottom)
+- TaskDetail screen presented as card (slides from right)
+
+src/components/navigation/BottomNavigation.js
+- Custom bottom navigation bar with scroll-responsive opacity
+- Uses react-native-reanimated for scroll animations
+- SVG icons that change color based on active state
+- Icons: Home, Projects (briefcase), Calendar (calendar grid), Profile (user)
+- Positioned absolutely at bottom with rounded corners
+- Integrates with ScrollContext for scroll-based animations
+
+================================================================================
+STATE MANAGEMENT
+================================================================================
+
+src/contexts/TaskContext.js
+-------------------------------
+Global task state management using React Context API.
+
+TASK CATEGORIES:
+- anytime: Tasks with optional "due by" time (Complete By tasks with dueBy)
+- dueToday: Tasks to complete today without specific time (Complete By without dueBy)
+- scheduled: Tasks with specific date and time (Scheduled tasks)
+
+KEY FUNCTIONS:
+- addTask(taskData): Adds new task to appropriate category
+- updateTask(taskId, updates): Updates existing task
+- deleteTask(taskId): Removes task
+- toggleTaskComplete(taskId): Toggles completion status
+- toggleSubtask(taskId, subtaskId): Toggles subtask completion
+- findTask(taskId): Finds task across all categories
+- calculateProgress(task): Calculates progress based on subtasks
+
+TASK OBJECT STRUCTURE:
+{
+  id: String (unique),
+  type: 'scheduled' | 'completeBy',
+  title: String,
+  description: String,
+  category: String,
+  date: Date object,
+  time: String (for scheduled), // "3:30 PM"
+  dueBy: String (for completeBy), // Optional
+  length: Number (minutes),
+  subTasks: Array [{id, name, description, completed}],
+  completed: Boolean,
+  progress: Number (0-100),
+  originalProgress: Number
+}
+
+PROGRESS CALCULATION:
+- No subtasks: 0% or 100% (if completed)
+- With subtasks: (completedSubtasks / totalSubtasks) * 100
+
+src/contexts/ScrollContext.js
+- Manages scroll position across the app
+- Provides scrollY value for animations
+- Used by BottomNavigation for scroll-based effects
+
+================================================================================
+SCREENS
+================================================================================
+
+src/screens/TasksScreen.js (PRIMARY SCREEN - FULLY IMPLEMENTED)
+--------------------------------------------------------------
+Main home screen with complete task management functionality.
+
+KEY FEATURES:
+- Header with date/time and Add Task button
+- Progress ring showing daily task completion (today's tasks only)
+- Interactive timeline of today's scheduled tasks
+- Today's Tasks section with:
+  * Complete Today subsection (anytime + dueToday tasks)
+  * Scheduled subsection (today's scheduled tasks)
+  * Always visible with empty states
+- Completed Tasks section (today's completed tasks)
+- Date filtering: Only shows tasks for current day
+- Navigation to TaskDetail screen on task tap
+
+DATE FILTERING SYSTEM:
+- isSameDay(date1, date2): Compares dates (ignores time)
+- filterTasksForToday(taskArray): Filters tasks for current day
+- Applied to: Timeline, Today's Tasks, Progress Ring, all counts
+
+TASK MANAGEMENT:
+- handleTaskComplete(taskId): Toggles task completion
+- Tasks from TaskContext, not local state
+- Animated transitions between sections
+- Auto-sorting of tasks by time
+
+ANIMATIONS:
+- FadeIn when sections appear
+- Layout animations when tasks move
+- Progress ring animation
+- Task card animations
+
+EMPTY STATES:
+- Timeline: "You Have No Scheduled Tasks"
+- Complete Today: "You Have No Complete Today Tasks At The Moment"
+- Scheduled: "You Have No Scheduled Tasks At The Moment"
+
+src/screens/AddTaskScreen.js (FULLY IMPLEMENTED)
+--------------------------------------------------------------
+Modal screen for creating new tasks.
+
+FEATURES:
+- Two task types: "Scheduled Task" and "Complete By Task"
+- Custom dropdown modals (replaced Picker for cross-platform compatibility)
+- Date picker for task date
+- Time picker for scheduled tasks
+- Duration selector (15min to 2 hours) for scheduled tasks
+- Optional "Due By" time for Complete By tasks
+- Dynamic subtask management (add/remove)
+- Form validation before submission
+- Modal presentation with slide-up animation
+
+CUSTOM DROPDOWNS:
+- Task Type picker (Scheduled vs Complete By)
+- Length picker (6 duration options)
+- Better UX than native Picker, cross-platform consistent
+
+TASK CREATION FLOW:
+1. Select task type (Scheduled or Complete By)
+2. Enter task name and description
+3. Set date and (optionally) time/length/dueBy
+4. Add subtasks if needed
+5. Validate and submit to TaskContext
+
+src/screens/TaskDetailScreen.js (FULLY IMPLEMENTED)
+--------------------------------------------------------------
+Detailed view for individual tasks.
+
+FEATURES:
+- Back navigation to previous screen
+- Task name and category display
+- Description section
+- Details section: Date, Time, Length, Due By, Type
+- Progress bar with percentage
+- Subtasks list with toggle functionality
+- Empty state for tasks with no subtasks
+- Integration with TaskContext for subtask toggling
+
+SUBTASK INTERACTION:
+- Tap subtask to toggle completion
+- Visual checkbox with checkmark animation
+- Strikethrough text when completed
+- Progress updates automatically
+
+src/screens/ProjectsScreen.js
+- Placeholder screen
+- Shows "Projects" title with "Coming Soon" message
+- Uses same background pattern as TasksScreen
+
+src/screens/CalendarScreen.js
+- Prepared for implementation
+- Has DottedBackground and TopGradientOverlay
+- Shows "Calendar" title with "Coming Soon" message
+- Ready for Ghost Calendar or Tetris Calendar implementation
+- Uses SafeAreaView and ScrollView structure
+
+src/screens/MarketplaceScreen.js
+- Placeholder screen
+- Shows "Marketplace" title with "Coming Soon" message
+- Mapped to "Profile" tab in navigation
+
+================================================================================
+COMPONENTS - TASKS
+================================================================================
+
+src/components/tasks/TaskCard.js
+-------------------------------
+Interactive task card with sophisticated animations.
+
+PROPS:
+- id: Task identifier
+- progress: Current progress (0-100)
+- category: Category/project label
+- title: Task title
+- percentage: Progress percentage
+- completed: Boolean completion status
+- time: Optional time display
+- onComplete: Callback when task is marked complete
+- onUncomplete: Callback when task is marked incomplete
+- originalProgress: Progress before completion (for uncomplete)
+- onPress: Callback for navigation to detail screen
+
+FEATURES:
+- Separated touch areas: card content (navigation) vs checkbox (toggle)
+- Checkbox overlay with higher z-index for reliable tapping
+- Liquid fill progress bar that animates
+- Strikethrough animation on completion
+- Fade out/in animations
+- Smooth progress bar transitions
+- Checkmark SVG appears when completed
+- Percentage display on right side
+
+ANIMATION SEQUENCE (Complete):
+1. Checkbox fills and shows checkmark (200ms)
+2. Progress bar animates to 100% (400ms)
+3. Text strikethrough appears (300ms delay)
+4. Card fades out (400ms, after 600ms delay)
+5. onComplete callback fires, moving task to completed section
+
+ANIMATION SEQUENCE (Uncomplete):
+1. Checkbox empties (200ms)
+2. Progress bar returns to original value (400ms)
+3. Strikethrough disappears (300ms delay)
+4. Card fades out (400ms, after 600ms delay)
+5. onUncomplete callback fires, returning task to original section
+
+TOUCH TARGET SEPARATION:
+- Main card: TouchableOpacity for navigation (entire card area)
+- Checkbox: Separate TouchableOpacity with higher z-index (left side)
+
+================================================================================
+COMPONENTS - COMMON
+================================================================================
+
+src/components/common/DottedBackground.js
+-----------------------------------------
+Background pattern component using SVG.
+
+FEATURES:
+- Creates repeating dot pattern across entire screen
+- Uses SVG Pattern with 12x12 grid
+- Dots are 0.8 radius circles
+- Color from colors.divider
+- Positioned with absolute fill
+
+src/components/common/TopGradientOverlay.js
+------------------------------------------
+Gradient overlay at top of screens.
+
+FEATURES:
+- Linear gradient from solid to transparent
+- Colors: background color (F8FAFC) to transparent
+- Height: 220px
+- Positioned absolutely at top
+- Creates smooth fade effect for content
+
+src/components/common/SectionHeader.js
+-------------------------------------
+Section title component with decorative divider.
+
+PROPS:
+- title: Section title text
+
+FEATURES:
+- Light font weight (Lexend_300Light)
+- SVG divider line below title
+- Decorative pattern: solid → dashed → dotted
+- Three-section divider design
+- 8px padding below title
+
+src/components/common/ProgressRing.js
+------------------------------------
+Circular progress indicator with dual rings.
+
+PROPS:
+- completed: Number of completed tasks
+- total: Total number of tasks
+- scheduledCompleted: Completed scheduled tasks
+- anytimeCompleted: Completed "complete today" tasks (anytime)
+- dueTodayCompleted: Completed "due today" tasks
+
+FEATURES:
+- Two animated progress rings (dual-ring design)
+- Scheduled ring (bottom layer): Shows total completed (all categories)
+- Anytime ring (top layer): Shows only anytime completed
+- Center displays: completed/total (e.g., "2/7")
+- Legend: "Scheduled" and "Complete Today"
+- Smooth animations (1500ms with cubic easing)
+- Division by zero guards for empty state
+- 160x160px SVG canvas
+- Radius: 42px, Stroke width: 12px
+
+CALCULATIONS:
+- Prevents NaN errors when total === 0
+- totalCompletedTasks = anytimeCompleted + dueTodayCompleted + scheduledCompleted
+- Separate percentage calculations for each ring
+- Uses circumference for progress calculations
+- Percentage-based strokeDashoffset animation
+
+src/components/common/Timeline.js
+--------------------------------
+Chronological task timeline with smooth scrolling.
+
+ARCHITECTURE:
+- Split into 3 components to fix React Hooks violations:
+  * Timeline: Router component (decides which to render)
+  * TimelineEmpty: Empty state component (no hooks)
+  * TimelineContent: Full timeline with all hooks
+- This ensures consistent hook count regardless of isEmpty prop
+
+PROPS:
+- tasks: Array of task objects with time and status
+- onTaskToggle: Callback for task interaction
+- isEmpty: Boolean to show empty state
+
+TASK OBJECT STRUCTURE:
+{
+  time: Number (decimal, e.g., 14.75 for 2:45 PM),
+  title: String,
+  status: 'missed' | 'next' | 'upcoming' | 'completed' | 'message',
+  project: String (optional),
+  id: String
+}
+
+KEY FEATURES:
+- Task-based timeline (NOT 24-hour based)
+- Shows tasks in chronological order
+- Tasks at any time: 2:45 PM, 3:30 PM, etc. (not just on the hour)
+- Index-based positioning (task 0, task 1, task 2...)
+- Pan gesture for smooth scrolling
+- Auto-snaps to nearest task
+- Highlights "Up Next" task (no "UP NEXT" on message cards)
+- Shows completed tasks with strikethrough
+- Scale and opacity animations for focus effect
+- Empty state: "You Have No Scheduled Tasks"
+
+LAYOUT:
+- HOUR_HEIGHT: 120px (spacing between tasks)
+- CONTAINER_HEIGHT: 120px
+- CENTER_OFFSET: -5px (adjusted for better centering)
+- Each task slot shows: time label (e.g., "2:45 PM") | task card
+
+POSITIONING SYSTEM:
+- Tasks sorted by time, then positioned by index
+- slotPosition = index * HOUR_HEIGHT (not time * HOUR_HEIGHT)
+- Prevents overlap issues with tasks at same/similar times
+- Evenly spaces tasks regardless of actual time gaps
+
+GESTURE HANDLING:
+- Pan gesture changes scrollY
+- maxScroll = (tasks.length - 1) * HOUR_HEIGHT
+- On release: snaps to nearest task position
+- Spring animation for snap (damping: 35, stiffness: 180)
+
+TASK CARD STATES:
+- "next" → "UP NEXT" label (only for actual tasks, not messages)
+- "upcoming" → Normal styling with checkbox
+- "completed" → Strikethrough, checkmark
+- "missed" → Strikethrough, red styling
+- "message" → Special message card (no UP NEXT label)
+
+INITIALIZATION:
+- Automatically scrolls to "Up Next" task by index
+- Falls back to first upcoming task
+- Falls back to first task (index 0)
+- Uses task index for scroll position, not time
+
+COMPONENT EXTRACTION:
+- TimelineTaskSlot: Separate component for each task slot
+- Each slot has its own useAnimatedStyle hook
+- Prevents hook count violations when task count changes
+- Key prop uses slot.task.id for React reconciliation
+
+================================================================================
+STYLING SYSTEM
+================================================================================
+
+src/styles/colors.js
+--------------------
+Centralized color palette using neutral gray scale.
+
+BACKGROUND COLORS:
+- background: #F8FAFC (light gray-blue)
+- white: #FFFFFF
+- cardBackground: #FFFFFF
+
+TEXT COLORS (grayscale hierarchy):
+- textPrimary: #000000 (black, highest emphasis)
+- textSecondary: #1F2937 (dark gray)
+- textTertiary: #4B5563 (medium dark gray)
+- textMuted: #6B7280 (medium gray)
+- textLight: #9CA3AF (light gray, lowest emphasis)
+
+BORDERS & DIVIDERS:
+- border: #9CA3AF (medium gray)
+- borderLight: #E5E7EB (light gray)
+- divider: #D1D5DB (light gray)
+
+TASK ELEMENTS:
+- liquidFill: rgba(229, 231, 235, 0.65) (semi-transparent gray)
+- avatarBackground: #E5E7EB (light gray)
+- checkboxBorder: #D1D5DB (light gray)
+- checkboxCompleted: #000000 (black)
+
+PROGRESS RING COLORS:
+- scheduledColor: #000000 (black) - for scheduled tasks ring
+- anytimeColor: #6B7280 (gray) - for complete today tasks ring
+
+DESIGN APPROACH:
+- Minimalist, monochromatic palette
+- Black as primary accent color
+- Grayscale for hierarchy and depth
+- Subtle shadows and borders
+- Clean, modern aesthetic
+
+================================================================================
+KEY FEATURES & FUNCTIONALITY
+================================================================================
+
+TASK MANAGEMENT
+---------------
+1. Create tasks via AddTaskScreen modal
+   - Scheduled tasks (with date, time, length)
+   - Complete By tasks (with date, optional due by time)
+   - Subtasks support
+   - Form validation
+2. Complete/uncomplete tasks with smooth animations
+3. Toggle subtasks in TaskDetailScreen
+4. Task categorization (Anytime, Due Today, Scheduled)
+5. Progress tracking based on subtask completion
+6. Original progress preservation when uncompleting
+7. Navigation to task details
+8. Date-based task filtering (only today's tasks shown)
+
+DATE FILTERING
+--------------
+- Only tasks matching current date are shown in:
+  * Timeline (Your Schedule)
+  * Today's Tasks section
+  * Progress Ring
+  * All task counts
+- isSameDay() utility compares dates (year, month, day)
+- filterTasksForToday() filters task arrays
+- Future/past tasks are hidden from these views
+
+ANIMATIONS & INTERACTIONS
+-------------------------
+1. Reanimated v4 for performant animations
+2. Layout animations when sections change
+3. Task card fade in/out transitions
+4. Progress bar liquid fill animations
+5. Checkbox check/uncheck animations
+6. Strikethrough text animations
+7. Timeline scroll with spring physics
+8. Progress ring circular animations
+9. Scale and opacity effects in timeline
+10. Modal slide-up animations (AddTask)
+11. Card slide animations (TaskDetail)
+
+TIMELINE SYSTEM
+---------------
+1. Chronological task-based timeline (not 24-hour grid)
+2. Shows tasks at any time (2:45 PM, 3:30 PM, etc.)
+3. Index-based positioning for consistent spacing
+4. Gesture-based scrolling with pan handler
+5. Snap-to-task behavior
+6. Task status visualization (missed, next, upcoming, completed, message)
+7. Smart initialization to "Up Next" task
+8. Empty state handling
+9. Split component architecture to avoid React Hooks violations
+10. Date filtering (only today's scheduled tasks)
+
+PROGRESS TRACKING
+-----------------
+1. Dual-ring progress indicator
+2. Separate tracking for scheduled vs complete today
+3. Completion percentage display
+4. Visual breakdown with legend
+5. Animated progress updates
+6. Division by zero protection
+7. Subtask-based progress calculation
+8. Only today's tasks counted
+
+UI/UX PATTERNS
+--------------
+1. Stack + Tab navigation for modal support
+2. Dotted background pattern for depth
+3. Gradient overlays for visual appeal
+4. Custom dropdown modals (cross-platform)
+5. Card-based layout with shadows
+6. Consistent spacing and padding
+7. View-based safe area handling (removed SafeAreaView for continuous scroll)
+8. Custom fonts (Lexend family)
+9. Empty state messages throughout
+10. Always-visible Today's Tasks section
+11. Separated touch targets (checkbox vs card)
+
+================================================================================
+DEPENDENCIES & LIBRARIES
+================================================================================
+
+CORE FRAMEWORK
+--------------
+- expo: ~54.0.9 - Development platform
+- react: 19.1.0 - UI library
+- react-native: 0.81.4 - Mobile framework
+
+NAVIGATION
+----------
+- @react-navigation/native: ^7.1.17 - Navigation framework
+- @react-navigation/material-top-tabs: ^7.1.17 - Top tab navigator (bottom position)
+- @react-navigation/stack: ^7.2.10 - Stack navigator for modals
+- react-native-screens: ^4.16.0 - Native screen management
+- react-native-safe-area-context: ^5.6.1 - Safe area handling
+
+ANIMATIONS
+----------
+- react-native-reanimated: ^4.1.0 - High-performance animations
+- react-native-gesture-handler: ^2.28.0 - Touch gesture system
+
+GRAPHICS & VISUAL
+-----------------
+- react-native-svg: 15.12.1 - SVG rendering
+- expo-linear-gradient: ~15.0.7 - Gradient components
+- expo-blur: ~15.0.7 - Blur effects (glassmorphism)
+
+FONTS & TYPOGRAPHY
+------------------
+- expo-font: ~14.0.8 - Custom font loading
+- @expo-google-fonts/lexend: ^0.4.1 - Lexend font family
+
+DATE/TIME
+---------
+- @react-native-community/datetimepicker: ^8.2.0 - Native date/time pickers
+
+OTHER
+-----
+- expo-status-bar: ~3.0.8 - Status bar control
+- @expo/ngrok: ^4.1.3 - Development tunneling
+- react-dom: 19.1.0 - Web support
+- react-native-web: ^0.21.0 - Web platform support
+
+================================================================================
+CURRENT STATE & FUTURE DEVELOPMENT
+================================================================================
+
+FULLY IMPLEMENTED
+-----------------
+✓ TasksScreen with complete functionality
+✓ AddTaskScreen for task creation (modal)
+✓ TaskDetailScreen for task details and subtasks
+✓ TaskContext for global state management
+✓ Task completion/uncompletion system
+✓ Subtask management and progress tracking
+✓ Progress tracking and visualization
+✓ Timeline component with chronological task display
+✓ Date filtering (only today's tasks shown)
+✓ Stack + Tab navigation architecture
+✓ Bottom navigation with custom styling
+✓ All reusable components (cards, progress ring, etc.)
+✓ Animation system with Reanimated v4
+✓ Color theming
+✓ Empty state handling
+✓ Custom dropdown modals (replaced Picker)
+✓ Form validation
+✓ Cross-platform compatibility fixes
+
+READY FOR IMPLEMENTATION
+------------------------
+□ CalendarScreen - Ghost Calendar or Tetris Calendar
+  * CalendarScreen.js has base structure
+  * 10 calendar ideas researched and documented
+  * Recommended: Ghost Calendar (learn from patterns) or Tetris Calendar (gamified)
+
+PLACEHOLDERS (TO BE IMPLEMENTED)
+--------------------------------
+□ ProjectsScreen - Full project management interface
+□ MarketplaceScreen - Profile or marketplace features
+□ Task editing functionality
+□ Task deletion functionality
+□ Data persistence (currently in-memory only)
+□ Backend integration
+□ User authentication
+□ Task notifications
+□ Recurring tasks
+□ Task priorities/tags
+□ Search and filtering
+□ Settings screen
+□ Multi-day task support
+
+DATA PERSISTENCE NEEDED
+-----------------------
+Currently all data is stored in TaskContext (in-memory).
+For production, implement:
+- AsyncStorage for local persistence
+- Backend API integration
+- Database schema
+- Sync mechanism
+
+================================================================================
+ARCHITECTURE DECISIONS & PATTERNS
+================================================================================
+
+STATE MANAGEMENT
+----------------
+- React Context API for global task state
+- Centralized TaskContext with all CRUD operations
+- No Redux needed for current scope
+- Context providers wrap entire app in App.js
+
+COMPONENT ARCHITECTURE
+----------------------
+- Presentational vs Container pattern
+- Extracted components to avoid React Hooks violations
+  (Timeline split into 3 components)
+- Reusable components in common/ folder
+- Screen-specific components in tasks/ folder
+
+NAVIGATION PATTERN
+------------------
+- Stack Navigator wraps Tab Navigator
+- Enables modal presentations (AddTask)
+- Enables card presentations (TaskDetail)
+- Material Top Tabs positioned at bottom
+- Custom tab bar for better control
+
+ANIMATION STRATEGY
+------------------
+- react-native-reanimated for all animations
+- Shared values for performance
+- Worklet functions for gesture handling
+- Spring physics for natural movement
+- Timing functions for UI transitions
+
+HOOKS BEST PRACTICES
+---------------------
+- Always call hooks unconditionally
+- Split components when hooks become conditional
+- Use component extraction for dynamic hook counts
+- Example: TimelineTaskSlot extracted from Timeline map loop
+
+================================================================================
+KNOWN ISSUES & FIXES APPLIED
+================================================================================
+
+FIXED ISSUES
+------------
+✓ Complete Today tasks time labels not fading when completed
+  - Fixed by filtering completed tasks from getSortedAnytimeTasks()
+
+✓ Progress ring double-counting tasks
+  - Fixed by calculating each category separately (anytime, dueToday, scheduled)
+
+✓ Division by zero in ProgressRing causing NaN in SVG
+  - Added guards: if (total === 0) return early with full circle
+
+✓ React Native Picker not working (blank white card)
+  - Replaced with custom TouchableOpacity + Modal dropdowns
+
+✓ Tasks not appearing after creation
+  - Added dueToday tasks to rendering
+  - Fixed conditional checks
+
+✓ Task names missing in Scheduled/Timeline/Completed sections
+  - Changed from 'name' property to 'title' property
+
+✓ Completed section disappearing on scroll
+  - Removed buggy opacity animation, kept simple FadeIn
+
+✓ Sticky top scroll issue (content going under safe area)
+  - Removed SafeAreaView, used regular View for continuous scroll
+
+✓ React Hooks violations in Timeline
+  - Split Timeline into TimelineEmpty/TimelineContent/Timeline
+  - Extracted TimelineTaskSlot for map loops
+
+✓ Timeline not showing tasks at non-hour times (2:45 PM, 3:30 PM)
+  - Redesigned from 24-hour slots to chronological task-based system
+  - Index-based positioning instead of time-based
+
+✓ Task overlap issues
+  - Index-based positioning prevents overlaps
+  - Each task gets its own slot at its index position
+
+✓ Tasks from other dates showing in Today's view
+  - Added date filtering throughout
+  - isSameDay() and filterTasksForToday() utilities
+
+CURRENT ISSUES
+--------------
+None reported.
+
+================================================================================
+NOTES FOR FUTURE SESSIONS
+================================================================================
+
+1. PROJECT STRUCTURE: The app follows a standard React Native organization
+   with clear separation of screens, components, navigation, contexts, and styles.
+
+2. STATE MANAGEMENT: TaskContext handles all task state. Start here when
+   adding new task-related features.
+
+3. MAIN SCREEN: TasksScreen.js contains the home functionality. Uses TaskContext
+   for all task operations.
+
+4. ANIMATIONS: Heavily uses react-native-reanimated v4. Shared values and
+   animated styles are the primary animation patterns.
+
+5. TIMELINE ARCHITECTURE: Timeline is split into 3 components to avoid React
+   Hooks violations. Task-based (not hour-based), index-based positioning.
+
+6. DATE FILTERING: All today-focused views filter by date using isSameDay().
+   filterTasksForToday() is called extensively in TasksScreen.
+
+7. TASK TYPES: Two types - Scheduled (date/time/length) and Complete By
+   (date, optional dueBy time). Categorized into anytime/dueToday/scheduled.
+
+8. HOOKS VIOLATIONS: Be careful with conditional hooks. Extract components
+   when hook counts become dynamic (like in map loops).
+
+9. STYLING: All colors centralized in src/styles/colors.js. Follows a
+   consistent grayscale + black accent palette.
+
+10. FONTS: Uses Lexend font family (Light, Regular, Medium, SemiBold, Bold).
+    Loaded via expo-google-fonts.
+
+11. CALENDAR SCREEN: Ready for implementation. Two main options researched:
+    - Ghost Calendar: Shows last week's tasks overlaid transparently, helps
+      users learn from scheduling patterns and mistakes
+    - Tetris Calendar: Gamified time-blocking where tasks are "blocks" that
+      auto-fit into schedule, with scoring and achievements
+
+12. CROSS-PLATFORM: Custom modals replace Picker for better cross-platform
+    compatibility. Careful with native components.
+
+13. NAVIGATION: Stack wraps Tabs. Use navigation.navigate('AddTask') for modal,
+    navigation.navigate('TaskDetail', { taskId }) for details.
+
+14. EMPTY STATES: All major sections have empty state messages. Important for
+    first-run experience.
+
+15. PROGRESS CALCULATION: Based on subtasks. No subtasks = 0% or 100%.
+    With subtasks = (completed / total) * 100.
+
+================================================================================
+CALENDAR IMPLEMENTATION IDEAS (RESEARCHED)
+================================================================================
+
+10 CALENDAR APPROACHES FOR TASK MANAGEMENT:
+
+1. **Hybrid Month + Agenda View**
+   - Month grid at top with colored dots
+   - Scrollable agenda below for selected day
+   - Best for: Overview + detail in one screen
+
+2. **Week View with Time Blocks**
+   - Horizontal scrollable week
+   - Vertical timeline with task blocks
+   - Best for: Scheduling and time visualization
+
+3. **Daily Focus View**
+   - Single day view, swipe to change days
+   - Tasks grouped by Morning/Afternoon/Evening
+   - Best for: Minimalist, mobile-friendly approach
+
+4. **Timeline Scroll (Continuous Days)**
+   - Infinite vertical scroll through days
+   - Each day is a card with tasks
+   - Best for: Natural scrolling, see multiple days
+
+5. **Heatmap Calendar**
+   - Month grid with color intensity = task load
+   - Best for: Workload balancing visualization
+
+6. **Gantt-Style Calendar**
+   - Tasks as horizontal bars spanning duration
+   - Best for: Project planning, dependencies
+
+7. **Compact List with Date Sections**
+   - Grouped: Today, Tomorrow, This Week, Later
+   - Best for: Simple, fast, task-focused
+
+8. **Split Month + Week View**
+   - Small month overview (top)
+   - Selected week below with time slots
+   - Best for: Navigation + detail in one screen
+
+9. **Floating Date Picker + List**
+   - Main screen: Today's tasks
+   - Floating calendar for date selection
+   - Best for: Task list primary, calendar as tool
+
+10. **AI-Powered Smart Schedule**
+    - Auto-arranges tasks by priority/deadlines
+    - Machine learning optimization
+    - Best for: Reducing planning overhead
+
+RECOMMENDED FOR TASKLYAPP:
+**Ghost Calendar** (Learning & Pattern Recognition)
+- Shows last week's tasks overlaid transparently on current week
+- Helps users learn from scheduling mistakes
+- AI insights panel shows patterns (e.g., "You overbook Mondays 80% of time")
+- Success/warning indicators for time slots
+- Educational and data-driven approach
+
+**Tetris Time-Block Calendar** (Gamified Scheduling)
+- Tasks are "falling blocks" that fit into schedule
+- Drag, resize, rotate task blocks
+- Auto-fit algorithm finds best time slots
+- Scoring system, combos, achievements
+- Gap visualization (wasted time)
+- Makes scheduling fun and engaging
+
+================================================================================
+END OF PROJECT OVERVIEW
+================================================================================
