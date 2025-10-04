@@ -29,4 +29,9 @@ export const colors = {
   // Progress ring colors
   anytimeColor: '#6B7280', // Dark grey for anytime tasks
   scheduledColor: '#94A3B8', // Blue-grey for scheduled tasks
+
+  // Calendar colors
+  scheduledTaskCalendar: '#C5BFD9', // Purple-grey pastel for scheduled tasks
+  completeTodayTaskCalendar: '#B8CAD9', // Blue-grey pastel for complete today tasks
+  currentTimeIndicator: '#000000', // Black for current time line
 };
