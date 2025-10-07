@@ -44,13 +44,21 @@ TasklyApp/
     │   ├── AddTaskScreen.js       # Task creation modal (fully implemented)
     │   ├── TaskDetailScreen.js    # Task detail view (fully implemented)
     │   ├── ProjectsScreen.js      # Projects tab (placeholder)
-    │   ├── CalendarScreen.js      # Calendar tab (ready for implementation)
+    │   ├── CalendarScreen.js      # Calendar tab (fully implemented)
     │   └── MarketplaceScreen.js   # Profile tab (placeholder)
     ├── components/
     │   ├── navigation/
     │   │   └── BottomNavigation.js      # Custom bottom nav bar
     │   ├── tasks/
     │   │   └── TaskCard.js              # Task item with animations
+    │   ├── calendar/
+    │   │   ├── CalendarDayView.js       # 24-hour timeline day view
+    │   │   ├── CalendarWeekView.js      # Week view with 7 day cards
+    │   │   ├── CalendarTaskBlock.js     # Task cards on calendar
+    │   │   ├── WeekDayCard.js           # Individual day card for week view
+    │   │   ├── DatePickerModal.js       # Custom date picker (day/week/month)
+    │   │   ├── CalendarLegend.js        # Color legend
+    │   │   └── ViewSwitcher.js          # Day/Week/Month switcher
     │   └── common/
     │       ├── DottedBackground.js      # Dotted pattern background
     │       ├── TopGradientOverlay.js    # Gradient overlay effect
@@ -253,12 +261,73 @@ src/screens/ProjectsScreen.js
 - Shows "Projects" title with "Coming Soon" message
 - Uses same background pattern as TasksScreen
 
-src/screens/CalendarScreen.js
-- Prepared for implementation
-- Has DottedBackground and TopGradientOverlay
-- Shows "Calendar" title with "Coming Soon" message
-- Ready for Ghost Calendar or Tetris Calendar implementation
-- Uses SafeAreaView and ScrollView structure
+src/screens/CalendarScreen.js (FULLY IMPLEMENTED)
+-------------------------------------------------
+Day/Week/Month tab-based calendar with full day/week implementation.
+
+KEY FEATURES:
+- Material Top Tab Navigator with Day/Week/Month views
+- Custom header with CalendarLegend, ViewSwitcher, and date selector pill
+- Date selector pill with left/right chevrons for navigation
+- Custom DatePickerModal for date selection (day/week/month modes)
+- Auto-reset to Day view and today's date when navigating to Calendar
+- Transparent backgrounds showing dotted pattern
+- TopGradientOverlay for visual depth
+
+DATE PICKER (DatePickerModal.js):
+- Custom modal with slide-up animation
+- Three modes based on active view:
+  * Day mode: Full calendar grid for selecting specific dates
+  * Week mode: Calendar grid with week row selection (selects Sunday of week)
+  * Month mode: Month/year picker with Previous/Next Year buttons
+- White background with rounded top corners
+- Highlights selected date/week and today
+- "Done" or "Select" button to confirm
+
+DAY VIEW (CalendarDayView.js):
+- 24-hour timeline (12 AM to 12 AM next day)
+- 120px per hour grid with half-hour divisions
+- Vertical timeline axis line at edge of hour labels
+- Real-time current time indicator (updates every second)
+- Current time indicator ONLY shows when viewing today
+- Auto-scrolls to current time on page focus (when viewing today)
+- Darkened grid lines (colors.divider)
+- Current time line with 50% opacity (dot, line, time label)
+- Task blocks with type-based coloring
+- Overlap detection and multi-column layout
+- Reduced bottom padding for closer alignment to bottom bar
+
+TASK CARDS (CalendarTaskBlock.js):
+- White cards with pastel backgrounds (purple/blue based on type)
+- Inset border (2px darker shade) around interior perimeter
+- Square checkbox with rounded edges (borderRadius: 6)
+- Displays: category, title, and time (scheduled/due by)
+- Enhanced shadow and 12px border radius
+- Checkbox integrated inside card (not absolute positioned)
+
+WEEK VIEW (CalendarWeekView.js):
+- 7 vertical day cards (Sunday-Saturday) for selected week
+- ScrollView with compact card layout
+- Each card shows task overview for that day
+- Tapping a card navigates to Day view for that specific date
+- Cards display: day name, date, completion status, and task counts
+
+WEEK DAY CARDS (WeekDayCard.js):
+- Compact design (~100px height, 16px padding, 8px margin)
+- Header row: Day name | Completion pill | Date (fixed width for alignment)
+- Completion pill: White background, black outline, centered
+  * Shows "X/Y complete" or "No tasks"
+- Horizontal 3-metric layout with bullet separators:
+  * Scheduled count (purple - colors.scheduledTaskCalendar)
+  * Complete Today count (blue - colors.completeTodayTaskCalendar)
+  * Total count (black - colors.textPrimary)
+- Numbers: 36px font, color-coded to match calendar legend
+- Labels: 11px font below each number
+- Today card emphasized with 2px black outline (no background fill)
+- White card background with shadow
+
+MONTH VIEW:
+- Placeholder screen ("Coming Soon")
 
 src/screens/MarketplaceScreen.js
 - Placeholder screen
@@ -635,12 +704,23 @@ FULLY IMPLEMENTED
 ✓ TasksScreen with complete functionality
 ✓ AddTaskScreen for task creation (modal)
 ✓ TaskDetailScreen for task details and subtasks
+✓ CalendarScreen with day/week views and date picker
+✓ CalendarDayView with 24-hour timeline
+✓ CalendarWeekView with 7-day card layout
+✓ CalendarTaskBlock with enhanced styling
+✓ WeekDayCard with color-coded metrics
+✓ DatePickerModal with day/week/month modes
+✓ Real-time current time indicator (conditional - today only)
+✓ Auto-scroll to current time on focus
+✓ Calendar auto-reset to Day view and today on navigation
+✓ Vertical timeline axis line
 ✓ TaskContext for global state management
 ✓ Task completion/uncompletion system
 ✓ Subtask management and progress tracking
 ✓ Progress tracking and visualization
 ✓ Timeline component with chronological task display
 ✓ Date filtering (only today's tasks shown)
+✓ Timeline empty state for today's tasks
 ✓ Stack + Tab navigation architecture
 ✓ Bottom navigation with custom styling
 ✓ All reusable components (cards, progress ring, etc.)
@@ -653,8 +733,7 @@ FULLY IMPLEMENTED
 
 READY FOR IMPLEMENTATION
 ------------------------
-□ CalendarScreen - Ghost Calendar or Tetris Calendar
-  * CalendarScreen.js has base structure
+□ Calendar Month View - Monthly overview with task indicators
   * 10 calendar ideas researched and documented
   * Recommended: Ghost Calendar (learn from patterns) or Tetris Calendar (gamified)
 
@@ -771,6 +850,10 @@ FIXED ISSUES
 ✓ Tasks from other dates showing in Today's view
   - Added date filtering throughout
   - isSameDay() and filterTasksForToday() utilities
+
+✓ Timeline empty state not showing when scheduled tasks exist on other days
+  - Changed isEmpty check from tasks.scheduled.length to getTimelineTasks().length
+  - Now correctly shows "You Have No Scheduled Tasks" when today has no tasks
 
 CURRENT ISSUES
 --------------

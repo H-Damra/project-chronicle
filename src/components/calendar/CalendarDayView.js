@@ -1,14 +1,14 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useFonts, Lexend_300Light, Lexend_400Regular } from '@expo-google-fonts/lexend';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import CalendarTaskBlock from './CalendarTaskBlock';
 import { useTasks } from '../../contexts/TaskContext';
 import { colors } from '../../styles/colors';
 
 const HOUR_HEIGHT = 120; // Height of each hour slot in pixels (120px = 60px per 30-min interval)
 
-const CalendarDayView = ({ tasks }) => {
+const CalendarDayView = ({ tasks, selectedDate }) => {
   const navigation = useNavigation();
   const { toggleTaskComplete } = useTasks();
   const scrollViewRef = useRef(null);
@@ -18,29 +18,25 @@ const CalendarDayView = ({ tasks }) => {
     Lexend_400Regular,
   });
 
-  useEffect(() => {
-    // Auto-scroll to current time on mount
-    if (scrollViewRef.current) {
-      const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
-      // Position current time in the middle of visible area
-      const scrollPosition = (currentHour * HOUR_HEIGHT) + (currentMinute / 60 * HOUR_HEIGHT) - 200;
+  // Helper function to check if two dates are the same day
+  const isSameDay = (date1, date2) => {
+    if (!date1 || !date2) return false;
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+  };
 
-      setTimeout(() => {
-        scrollViewRef.current?.scrollTo({
-          y: Math.max(0, scrollPosition),
-          animated: true,
-        });
-      }, 300);
-    }
-  }, []);
+  // Check if selected date is today
+  const isToday = isSameDay(selectedDate, new Date());
 
+  // Helper functions for current time
   const getCurrentTimePosition = () => {
     const now = new Date();
     const hours = now.getHours();
     const minutes = now.getMinutes();
-    return (hours * HOUR_HEIGHT) + (minutes / 60 * HOUR_HEIGHT);
+    return (hours * HOUR_HEIGHT) + (minutes / 60 * HOUR_HEIGHT) + 8;
   };
 
   const getCurrentTimeLabel = () => {
@@ -52,6 +48,39 @@ const CalendarDayView = ({ tasks }) => {
     const displayMinutes = minutes < 10 ? `0${minutes}` : minutes;
     return `${displayHours}:${displayMinutes} ${ampm}`;
   };
+
+  // State for real-time current time indicator
+  const [currentTimePosition, setCurrentTimePosition] = useState(getCurrentTimePosition());
+  const [currentTimeLabel, setCurrentTimeLabel] = useState(getCurrentTimeLabel());
+
+  // Auto-scroll to current time when viewing today and screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (scrollViewRef.current && isToday) {
+        // Position current time in the middle of visible area
+        const scrollPosition = getCurrentTimePosition() - 200;
+
+        setTimeout(() => {
+          scrollViewRef.current?.scrollTo({
+            y: Math.max(0, scrollPosition),
+            animated: true,
+          });
+        }, 300);
+      }
+    }, [isToday])
+  );
+
+  // Update current time position and label every second (only if viewing today)
+  useEffect(() => {
+    if (!isToday) return;
+
+    const interval = setInterval(() => {
+      setCurrentTimePosition(getCurrentTimePosition());
+      setCurrentTimeLabel(getCurrentTimeLabel());
+    }, 1000); // Update every second
+
+    return () => clearInterval(interval);
+  }, [isToday]);
 
   // Parse time string "3:30 PM" to minutes from midnight
   const parseTimeToMinutes = (timeStr) => {
@@ -137,13 +166,12 @@ const CalendarDayView = ({ tasks }) => {
   };
 
   const layoutTasks = calculateTaskLayout(tasks);
-  const currentTimePosition = getCurrentTimePosition();
 
   if (!fontsLoaded) {
     return null;
   }
 
-  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const hours = Array.from({ length: 25 }, (_, i) => i);
 
   const handleTaskPress = (task) => {
     navigation.navigate('TaskDetail', { taskId: task.id });
@@ -166,8 +194,8 @@ const CalendarDayView = ({ tasks }) => {
       <View style={styles.container}>
         {/* Hour lines and labels */}
         {hours.map((hour) => {
-          const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-          const ampm = hour < 12 ? 'AM' : 'PM';
+          const displayHour = hour === 0 || hour === 24 ? 12 : hour > 12 ? hour - 12 : hour;
+          const ampm = (hour < 12 || hour === 24) ? 'AM' : 'PM';
 
           return (
             <React.Fragment key={hour}>
@@ -181,19 +209,24 @@ const CalendarDayView = ({ tasks }) => {
                 <View style={styles.hourLine} />
               </View>
 
-              {/* 30-minute line (no label) */}
-              <View style={styles.halfHourRow}>
-                <View style={styles.timeLabel} />
-                <View style={styles.halfHourLine} />
-              </View>
+              {/* 30-minute line (no label) - don't show for hour 24 */}
+              {hour < 24 && (
+                <View style={styles.halfHourRow}>
+                  <View style={styles.timeLabel} />
+                  <View style={styles.halfHourLine} />
+                </View>
+              )}
             </React.Fragment>
           );
         })}
 
+        {/* Vertical timeline axis */}
+        <View style={styles.verticalAxis} />
+
         {/* Task blocks */}
         <View style={styles.tasksContainer}>
           {layoutTasks.map((task, index) => {
-            const topPosition = (task.startMinutes / 60) * HOUR_HEIGHT;
+            const topPosition = (task.startMinutes / 60) * HOUR_HEIGHT + 8;
             const blockHeight = (task.durationMinutes / 60) * HOUR_HEIGHT;
             const containerWidth = 280; // Available width for tasks
             const blockWidth = containerWidth / task.totalColumns - 4;
@@ -217,21 +250,23 @@ const CalendarDayView = ({ tasks }) => {
           })}
         </View>
 
-        {/* Current time indicator */}
-        <View
-          style={[
-            styles.currentTimeLine,
-            { top: currentTimePosition }
-          ]}
-        >
-          <View style={styles.currentTimeDot} />
-          <View style={styles.currentTimeLineBar} />
-          <View style={styles.currentTimeLabel}>
-            <Text style={styles.currentTimeLabelText}>
-              {getCurrentTimeLabel()}
-            </Text>
+        {/* Current time indicator (only show if viewing today) */}
+        {isToday && (
+          <View
+            style={[
+              styles.currentTimeLine,
+              { top: currentTimePosition }
+            ]}
+          >
+            <View style={styles.currentTimeDot} />
+            <View style={styles.currentTimeLineBar} />
+            <View style={styles.currentTimeLabel}>
+              <Text style={styles.currentTimeLabelText}>
+                {currentTimeLabel}
+              </Text>
+            </View>
           </View>
-        </View>
+        )}
       </View>
     </ScrollView>
   );
@@ -240,13 +275,14 @@ const CalendarDayView = ({ tasks }) => {
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
+    backgroundColor: 'transparent',
   },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 0,
   },
   container: {
     position: 'relative',
-    height: HOUR_HEIGHT * 24,
+    height: HOUR_HEIGHT * 24 + (HOUR_HEIGHT / 2),
   },
   hourRow: {
     height: HOUR_HEIGHT / 2,
@@ -272,22 +308,30 @@ const styles = StyleSheet.create({
   hourLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.borderLight,
+    backgroundColor: colors.divider,
     marginTop: 8,
   },
   halfHourLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.borderLight,
-    marginTop: 4,
-    opacity: 0.5,
+    backgroundColor: colors.divider,
+    marginTop: 8,
+  },
+  verticalAxis: {
+    position: 'absolute',
+    left: 70,
+    top: 0,
+    width: 1,
+    height: HOUR_HEIGHT * 24 + (HOUR_HEIGHT / 2),
+    backgroundColor: colors.divider,
+    zIndex: 1,
   },
   tasksContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: HOUR_HEIGHT * 24,
+    height: HOUR_HEIGHT * 24 + (HOUR_HEIGHT / 2),
   },
   currentTimeLine: {
     position: 'absolute',
@@ -305,11 +349,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.currentTimeIndicator,
     marginLeft: 65,
     zIndex: 101,
+    opacity: 0.5,
   },
   currentTimeLineBar: {
     flex: 1,
     height: 2,
     backgroundColor: colors.currentTimeIndicator,
+    opacity: 0.5,
   },
   currentTimeLabel: {
     position: 'absolute',

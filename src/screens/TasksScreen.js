@@ -286,7 +286,7 @@ const TasksScreen = () => {
             <View style={styles.sectionCardInner}>
               <Timeline
                 tasks={getTimelineTasks()}
-                isEmpty={tasks.scheduled.length === 0}
+                isEmpty={getTimelineTasks().length === 0}
                 onTaskToggle={(taskId) => {
                   const task = tasks.scheduled.find(t => t.id === taskId);
                   if (task?.completed) {
