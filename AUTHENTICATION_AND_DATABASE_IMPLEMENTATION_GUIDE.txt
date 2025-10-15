@@ -1,0 +1,1685 @@
+================================================================================
+TASKLY APP - AUTHENTICATION AND DATABASE IMPLEMENTATION GUIDE
+================================================================================
+
+OVERVIEW
+--------
+This guide provides a step-by-step plan to add Google Sign-In authentication
+and user data storage to TasklyApp using Supabase as the backend.
+
+CURRENT STATE: All task data is stored in-memory via TaskContext (data is lost
+when app closes).
+
+TARGET STATE: Users can sign in with Google, and all their tasks are saved to
+a cloud database (Supabase) so data persists across sessions and devices.
+
+================================================================================
+WHY SUPABASE?
+================================================================================
+
+REASONS FOR CHOOSING SUPABASE:
+1. Best for solo developers - easy setup, great documentation
+2. Built-in authentication with Google Sign-In support
+3. PostgreSQL database (perfect for relational data like tasks → projects)
+4. Generous free tier: 500MB storage, 10K users, 3 projects
+5. Predictable pricing: $25/month if you need to scale
+6. Row Level Security (RLS) for secure data sharing (needed for future project
+   sharing feature)
+7. Real-time subscriptions (tasks update live across devices)
+8. No vendor lock-in - it's open source, you own your data
+
+ALTERNATIVES CONSIDERED:
+- Firebase: Good, but vendor lock-in and unpredictable costs
+- AWS Amplify: Too complex for solo developer, requires GraphQL knowledge
+
+================================================================================
+DATABASE SCHEMA DESIGN
+================================================================================
+
+Your app will need these PostgreSQL tables in Supabase:
+
+1. USERS TABLE (created automatically by Supabase Auth)
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (primary key)                    │
+   │ email       │ TEXT                                  │
+   │ created_at  │ TIMESTAMP                             │
+   │ (Supabase Auth manages this table automatically)    │
+   └─────────────────────────────────────────────────────┘
+
+2. USER_PROFILES TABLE (custom user data)
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (references auth.users)          │
+   │ name        │ TEXT                                  │
+   │ avatar_url  │ TEXT                                  │
+   │ google_id   │ TEXT                                  │
+   │ created_at  │ TIMESTAMP                             │
+   └─────────────────────────────────────────────────────┘
+
+3. TASKS TABLE
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (primary key)                    │
+   │ user_id     │ UUID (references user_profiles.id)    │
+   │ title       │ TEXT                                  │
+   │ description │ TEXT                                  │
+   │ type        │ TEXT ('scheduled' or 'completeBy')    │
+   │ category    │ TEXT                                  │
+   │ date        │ DATE                                  │
+   │ time        │ TEXT (for scheduled tasks)            │
+   │ due_by      │ TEXT (for completeBy tasks)           │
+   │ length      │ INTEGER (minutes)                     │
+   │ completed   │ BOOLEAN                               │
+   │ progress    │ INTEGER (0-100)                       │
+   │ created_at  │ TIMESTAMP                             │
+   │ updated_at  │ TIMESTAMP                             │
+   └─────────────────────────────────────────────────────┘
+
+4. SUBTASKS TABLE
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (primary key)                    │
+   │ task_id     │ UUID (references tasks.id)            │
+   │ name        │ TEXT                                  │
+   │ description │ TEXT                                  │
+   │ completed   │ BOOLEAN                               │
+   │ created_at  │ TIMESTAMP                             │
+   └─────────────────────────────────────────────────────┘
+
+5. PROJECTS TABLE (for future use)
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (primary key)                    │
+   │ owner_id    │ UUID (references user_profiles.id)    │
+   │ name        │ TEXT                                  │
+   │ description │ TEXT                                  │
+   │ color       │ TEXT                                  │
+   │ created_at  │ TIMESTAMP                             │
+   └─────────────────────────────────────────────────────┘
+
+6. PROJECT_SHARES TABLE (for future sharing feature)
+   ┌─────────────────────────────────────────────────────┐
+   │ id          │ UUID (primary key)                    │
+   │ project_id  │ UUID (references projects.id)         │
+   │ user_id     │ UUID (references user_profiles.id)    │
+   │ permission  │ TEXT ('view' or 'edit')               │
+   │ shared_at   │ TIMESTAMP                             │
+   └─────────────────────────────────────────────────────┘
+
+NOTE: We'll start by implementing tables 1-4 only. Tables 5-6 are for future
+features (Projects screen, sharing functionality).
+
+================================================================================
+ROW LEVEL SECURITY (RLS) POLICIES
+================================================================================
+
+WHAT IS RLS?
+Row Level Security ensures users can only access their own data. For example,
+User A cannot see User B's tasks.
+
+POLICIES TO IMPLEMENT:
+
+For TASKS table:
+- SELECT: Users can only read their own tasks (WHERE user_id = auth.uid())
+- INSERT: Users can only create tasks for themselves (WHERE user_id = auth.uid())
+- UPDATE: Users can only update their own tasks (WHERE user_id = auth.uid())
+- DELETE: Users can only delete their own tasks (WHERE user_id = auth.uid())
+
+For SUBTASKS table:
+- SELECT: Users can only read subtasks of their own tasks
+- INSERT: Users can only create subtasks for their own tasks
+- UPDATE: Users can only update subtasks of their own tasks
+- DELETE: Users can only delete subtasks of their own tasks
+
+For USER_PROFILES table:
+- SELECT: Users can read their own profile
+- INSERT: Users can create their own profile on first sign-in
+- UPDATE: Users can update their own profile
+
+IMPORTANT: RLS policies are written in SQL and configured in Supabase dashboard.
+They act as a security layer at the database level.
+
+================================================================================
+IMPLEMENTATION PHASES - DETAILED BREAKDOWN
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 0: PREREQUISITES (Before Starting)
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 0.1: Understand Expo Development Build
+──────────────────────────────────────────────
+WHY: Google Sign-In requires native code, which doesn't work in Expo Go.
+
+WHAT TO DO:
+1. Read Expo documentation on development builds
+2. Understand you'll need to run: npx expo run:android or npx expo run:ios
+3. This creates a custom version of Expo Go with your native dependencies
+
+IMPORTANT: You can still develop normally, but testing auth requires development
+build, not Expo Go.
+
+STEP 0.2: Create Google Cloud Project
+──────────────────────────────────────
+WHY: You need OAuth credentials to enable "Sign in with Google"
+
+WHAT TO DO:
+1. Go to: https://console.cloud.google.com/
+2. Create new project or select existing one
+3. Navigate to: APIs & Services → Credentials
+4. Create OAuth 2.0 Client IDs:
+   a) Web Application (for Supabase redirect)
+   b) Android (if targeting Android)
+   c) iOS (if targeting iOS)
+5. Save the Client ID and Client Secret for each
+
+NOTES:
+- For Android: You need SHA-1 fingerprint (get via: keytool command)
+- For iOS: You need Bundle ID from app.json
+- Keep credentials safe - never commit to Git
+
+STEP 0.3: Create Supabase Account and Project
+──────────────────────────────────────────────
+WHY: This is your backend database and authentication service
+
+WHAT TO DO:
+1. Go to: https://supabase.com
+2. Sign up for free account
+3. Create new project:
+   - Choose project name (e.g., "taskly-app")
+   - Set strong database password (save it!)
+   - Choose region closest to your users
+4. Wait 2-3 minutes for project to provision
+5. Save these values from Settings → API:
+   - Project URL (e.g., https://xxxxx.supabase.co)
+   - anon/public key (safe to use in mobile app)
+   - service_role key (NEVER expose in mobile app - only for backend)
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 1: CONFIGURE SUPABASE BACKEND (Database Setup)
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 1.1: Enable Google Auth Provider in Supabase
+──────────────────────────────────────────────────
+WHERE: Supabase Dashboard → Authentication → Providers
+
+WHAT TO DO:
+1. Click on "Google" provider
+2. Enable it
+3. Paste your Google Client ID (from Step 0.2)
+4. Paste your Google Client Secret (from Step 0.2)
+5. Copy the "Redirect URL" shown (looks like: https://xxxxx.supabase.co/auth/v1/callback)
+6. Add this redirect URL to your Google Cloud Console OAuth settings
+
+STEP 1.2: Create Database Tables
+─────────────────────────────────
+WHERE: Supabase Dashboard → SQL Editor
+
+WHAT TO DO:
+1. Click "New Query"
+2. Copy and paste the following SQL:
+
+```sql
+-- Create user_profiles table
+CREATE TABLE user_profiles (
+  id UUID REFERENCES auth.users(id) PRIMARY KEY,
+  name TEXT,
+  avatar_url TEXT,
+  google_id TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create tasks table
+CREATE TABLE tasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  type TEXT CHECK (type IN ('scheduled', 'completeBy')) NOT NULL,
+  category TEXT,
+  date DATE NOT NULL,
+  time TEXT,
+  due_by TEXT,
+  length INTEGER,
+  completed BOOLEAN DEFAULT FALSE,
+  progress INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create subtasks table
+CREATE TABLE subtasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  completed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX tasks_user_id_idx ON tasks(user_id);
+CREATE INDEX tasks_date_idx ON tasks(date);
+CREATE INDEX subtasks_task_id_idx ON subtasks(task_id);
+```
+
+3. Click "Run" to execute
+4. Verify tables were created: Table Editor → should see user_profiles, tasks, subtasks
+
+STEP 1.3: Enable Row Level Security (RLS)
+──────────────────────────────────────────
+WHERE: Supabase Dashboard → SQL Editor
+
+WHAT TO DO:
+1. Create new query
+2. Copy and paste:
+
+```sql
+-- Enable RLS on all tables
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subtasks ENABLE ROW LEVEL SECURITY;
+
+-- USER_PROFILES POLICIES
+CREATE POLICY "Users can view own profile"
+  ON user_profiles FOR SELECT
+  USING (auth.uid() = id);
+
+CREATE POLICY "Users can insert own profile"
+  ON user_profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile"
+  ON user_profiles FOR UPDATE
+  USING (auth.uid() = id);
+
+-- TASKS POLICIES
+CREATE POLICY "Users can view own tasks"
+  ON tasks FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own tasks"
+  ON tasks FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own tasks"
+  ON tasks FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own tasks"
+  ON tasks FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- SUBTASKS POLICIES
+CREATE POLICY "Users can view own subtasks"
+  ON subtasks FOR SELECT
+  USING (
+    auth.uid() IN (
+      SELECT user_id FROM tasks WHERE id = subtasks.task_id
+    )
+  );
+
+CREATE POLICY "Users can insert own subtasks"
+  ON subtasks FOR INSERT
+  WITH CHECK (
+    auth.uid() IN (
+      SELECT user_id FROM tasks WHERE id = subtasks.task_id
+    )
+  );
+
+CREATE POLICY "Users can update own subtasks"
+  ON subtasks FOR UPDATE
+  USING (
+    auth.uid() IN (
+      SELECT user_id FROM tasks WHERE id = subtasks.task_id
+    )
+  );
+
+CREATE POLICY "Users can delete own subtasks"
+  ON subtasks FOR DELETE
+  USING (
+    auth.uid() IN (
+      SELECT user_id FROM tasks WHERE id = subtasks.task_id
+    )
+  );
+```
+
+3. Click "Run"
+4. Verify policies: Authentication → Policies → should see all policies listed
+
+STEP 1.4: Create Database Function for Auto-Updated Timestamp
+──────────────────────────────────────────────────────────────
+WHERE: Supabase Dashboard → SQL Editor
+
+WHAT TO DO:
+This function automatically updates the "updated_at" field when a task is modified.
+
+```sql
+-- Create function to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger for tasks table
+CREATE TRIGGER update_tasks_updated_at
+  BEFORE UPDATE ON tasks
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+```
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 2: INSTALL DEPENDENCIES (React Native/Expo Side)
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 2.1: Install Supabase Client
+──────────────────────────────────
+WHERE: Terminal in project root
+
+WHAT TO DO:
+```bash
+npx expo install @supabase/supabase-js
+```
+
+WHY: This is the JavaScript client for interacting with Supabase
+
+STEP 2.2: Install Authentication Dependencies
+──────────────────────────────────────────────
+WHERE: Terminal in project root
+
+WHAT TO DO:
+```bash
+npx expo install expo-auth-session expo-crypto expo-web-browser
+```
+
+WHY:
+- expo-auth-session: Handles OAuth flow
+- expo-crypto: Generates secure random strings for OAuth
+- expo-web-browser: Opens browser for Google Sign-In
+
+STEP 2.3: Install Secure Storage for Tokens
+────────────────────────────────────────────
+WHERE: Terminal in project root
+
+WHAT TO DO:
+```bash
+npx expo install expo-secure-store
+```
+
+WHY: Securely stores authentication tokens on device (encrypted storage)
+
+STEP 2.4: Update package.json Scripts (Optional but Recommended)
+─────────────────────────────────────────────────────────────────
+WHERE: package.json
+
+WHAT TO DO:
+Add these scripts for easier development build testing:
+
+```json
+"scripts": {
+  "start": "expo start",
+  "android": "expo start --android",
+  "ios": "expo start --ios",
+  "web": "expo start --web",
+  "prebuild": "npx expo prebuild",
+  "run:android": "npx expo run:android",
+  "run:ios": "npx expo run:ios"
+}
+```
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 3: CREATE SUPABASE CLIENT CONFIGURATION
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 3.1: Create Environment Configuration File
+────────────────────────────────────────────────
+WHERE: Create new file: src/config/supabase.js
+
+WHAT TO DO:
+```javascript
+import 'react-native-url-polyfill/auto';
+import { createClient } from '@supabase/supabase-js';
+import * as SecureStore from 'expo-secure-store';
+
+// Supabase URL and anon key (get from Supabase Dashboard → Settings → API)
+const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE';
+
+// Custom storage adapter using Expo SecureStore
+const ExpoSecureStoreAdapter = {
+  getItem: async (key) => {
+    return await SecureStore.getItemAsync(key);
+  },
+  setItem: async (key, value) => {
+    await SecureStore.setItemAsync(key, value);
+  },
+  removeItem: async (key) => {
+    await SecureStore.deleteItemAsync(key);
+  },
+};
+
+// Create Supabase client
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage: ExpoSecureStoreAdapter,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+  },
+});
+```
+
+IMPORTANT:
+1. Replace YOUR_PROJECT_ID with your actual Supabase project URL
+2. Replace YOUR_ANON_KEY_HERE with your actual anon key
+3. NEVER commit these keys to public Git repos (use .env files in production)
+
+WHY SECURSTORE?
+Supabase needs to store auth tokens. SecureStore encrypts them on device
+(more secure than AsyncStorage).
+
+STEP 3.2: Install URL Polyfill
+───────────────────────────────
+WHERE: Terminal
+
+WHAT TO DO:
+```bash
+npm install react-native-url-polyfill
+```
+
+WHY: Supabase needs URL parsing, which isn't available in React Native by default.
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 4: CREATE AUTHENTICATION CONTEXT
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 4.1: Create AuthContext
+─────────────────────────────
+WHERE: Create new file: src/contexts/AuthContext.js
+
+WHAT TO DO:
+```javascript
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../config/supabase';
+
+const AuthContext = createContext({});
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    checkSession();
+
+    // Listen for auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth event:', event);
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      }
+    );
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  // Check if user has existing session
+  const checkSession = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      setUser(session?.user ?? null);
+    } catch (error) {
+      console.error('Error checking session:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sign in with Google (OAuth flow)
+  const signInWithGoogle = async () => {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'tasklyapp://auth/callback', // Deep link for your app
+        },
+      });
+
+      if (error) throw error;
+      return { data, error: null };
+    } catch (error) {
+      console.error('Error signing in with Google:', error);
+      return { data: null, error };
+    }
+  };
+
+  // Sign out
+  const signOut = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  const value = {
+    user,
+    session,
+    loading,
+    signInWithGoogle,
+    signOut,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+// Custom hook to use auth context
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+};
+```
+
+WHAT THIS DOES:
+- Manages authentication state (user, session, loading)
+- Provides sign-in and sign-out functions
+- Listens for auth changes (login/logout events)
+- Persists session across app restarts
+
+STEP 4.2: Update App.js to Include AuthProvider
+────────────────────────────────────────────────
+WHERE: App.js (root component)
+
+WHAT TO DO:
+Wrap your app in AuthProvider (above TaskProvider):
+
+```javascript
+import { AuthProvider } from './src/contexts/AuthContext';
+import { TaskProvider } from './src/contexts/TaskContext';
+import AppNavigator from './src/navigation/AppNavigator';
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <TaskProvider>
+          <AppNavigator />
+        </TaskProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
+  );
+}
+```
+
+WHY THIS ORDER?
+AuthProvider wraps TaskProvider because tasks need user authentication to
+determine which user's tasks to load.
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 5: CREATE LOGIN SCREEN
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 5.1: Create LoginScreen Component
+───────────────────────────────────────
+WHERE: Create new file: src/screens/LoginScreen.js
+
+WHAT TO DO:
+```javascript
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { makeRedirectUri } from 'expo-auth-session';
+import { supabase } from '../config/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import colors from '../styles/colors';
+
+// Required for Google Sign-In to work properly
+WebBrowser.maybeCompleteAuthSession();
+
+export default function LoginScreen() {
+  const [loading, setLoading] = useState(false);
+  const { signInWithGoogle } = useAuth();
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+
+      // Get OAuth URL from Supabase
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: makeRedirectUri(),
+        },
+      });
+
+      if (error) throw error;
+
+      // Open browser for OAuth flow
+      const result = await WebBrowser.openAuthSessionAsync(
+        data?.url ?? '',
+        makeRedirectUri()
+      );
+
+      if (result.type === 'success') {
+        // Extract tokens from URL
+        const { url } = result;
+        const params = new URLSearchParams(url.split('#')[1]);
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+
+        if (accessToken && refreshToken) {
+          // Set session with tokens
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (sessionError) throw sessionError;
+
+          // Success! User will be redirected by AuthContext listener
+        }
+      }
+    } catch (error) {
+      console.error('Sign in error:', error);
+      Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.title}>Welcome to Taskly</Text>
+        <Text style={styles.subtitle}>
+          Sign in to sync your tasks across devices
+        </Text>
+
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={handleGoogleSignIn}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.googleButtonText}>Sign in with Google</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  content: {
+    width: '80%',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: colors.textPrimary,
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: 40,
+  },
+  googleButton: {
+    backgroundColor: colors.textPrimary,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    width: '100%',
+    alignItems: 'center',
+  },
+  googleButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+```
+
+STEP 5.2: Update AppNavigator to Show Login Screen
+───────────────────────────────────────────────────
+WHERE: src/navigation/AppNavigator.js
+
+WHAT TO DO:
+Modify your AppNavigator to show LoginScreen when user is not authenticated:
+
+```javascript
+import { useAuth } from '../contexts/AuthContext';
+import LoginScreen from '../screens/LoginScreen';
+
+export default function AppNavigator() {
+  const { user, loading } = useAuth();
+
+  // Show loading screen while checking auth
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  // Show main app if authenticated
+  return (
+    <NavigationContainer>
+      {/* Your existing Stack/Tab navigators */}
+    </NavigationContainer>
+  );
+}
+```
+
+STEP 5.3: Configure Deep Linking for OAuth Redirect
+────────────────────────────────────────────────────
+WHERE: app.json
+
+WHAT TO DO:
+Add deep linking scheme:
+
+```json
+{
+  "expo": {
+    "name": "TasklyApp",
+    "slug": "tasklyapp",
+    "scheme": "tasklyapp",
+    // ... rest of config
+  }
+}
+```
+
+WHY?
+After Google Sign-In, the browser needs to redirect back to your app.
+The "scheme" enables this (tasklyapp://auth/callback).
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 6: MIGRATE TASKCONTEXT TO SUPABASE
+────────────────────────────────────────────────────────────────────────────────
+
+This is the most complex phase. We need to change TaskContext from in-memory
+storage to Supabase database operations.
+
+STEP 6.1: Understand Current vs New Architecture
+─────────────────────────────────────────────────
+
+CURRENT (In-Memory):
+- Tasks stored in React state: const [tasks, setTasks] = useState({...})
+- Data lost when app closes
+- No user association
+
+NEW (Supabase):
+- Tasks stored in PostgreSQL database
+- Data persists forever
+- Each task tied to user_id
+- CRUD operations use Supabase client
+
+STEP 6.2: Create Database Service Layer
+────────────────────────────────────────
+WHERE: Create new file: src/services/taskService.js
+
+WHAT TO DO:
+This file contains all database operations (fetch, create, update, delete tasks).
+
+```javascript
+import { supabase } from '../config/supabase';
+
+// Fetch all tasks for current user
+export const fetchUserTasks = async (userId) => {
+  try {
+    const { data: tasks, error: tasksError } = await supabase
+      .from('tasks')
+      .select('*, subtasks(*)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (tasksError) throw tasksError;
+
+    // Group tasks by category (scheduled, anytime, dueToday)
+    const categorized = {
+      scheduled: [],
+      anytime: [],
+      dueToday: [],
+    };
+
+    tasks.forEach((task) => {
+      // Convert database format to app format
+      const formattedTask = {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        type: task.type,
+        category: task.category,
+        date: new Date(task.date),
+        time: task.time,
+        dueBy: task.due_by,
+        length: task.length,
+        completed: task.completed,
+        progress: task.progress,
+        subTasks: task.subtasks.map((st) => ({
+          id: st.id,
+          name: st.name,
+          description: st.description,
+          completed: st.completed,
+        })),
+      };
+
+      // Categorize based on type and dueBy
+      if (task.type === 'scheduled') {
+        categorized.scheduled.push(formattedTask);
+      } else if (task.type === 'completeBy') {
+        if (task.due_by) {
+          categorized.anytime.push(formattedTask);
+        } else {
+          categorized.dueToday.push(formattedTask);
+        }
+      }
+    });
+
+    return { data: categorized, error: null };
+  } catch (error) {
+    console.error('Error fetching tasks:', error);
+    return { data: null, error };
+  }
+};
+
+// Create new task
+export const createTask = async (userId, taskData) => {
+  try {
+    // Insert task
+    const { data: task, error: taskError } = await supabase
+      .from('tasks')
+      .insert([
+        {
+          user_id: userId,
+          title: taskData.title,
+          description: taskData.description,
+          type: taskData.type,
+          category: taskData.category,
+          date: taskData.date.toISOString().split('T')[0], // Convert to YYYY-MM-DD
+          time: taskData.time,
+          due_by: taskData.dueBy,
+          length: taskData.length,
+          completed: false,
+          progress: 0,
+        },
+      ])
+      .select()
+      .single();
+
+    if (taskError) throw taskError;
+
+    // Insert subtasks if any
+    if (taskData.subTasks && taskData.subTasks.length > 0) {
+      const subtasksToInsert = taskData.subTasks.map((st) => ({
+        task_id: task.id,
+        name: st.name,
+        description: st.description,
+        completed: false,
+      }));
+
+      const { error: subtasksError } = await supabase
+        .from('subtasks')
+        .insert(subtasksToInsert);
+
+      if (subtasksError) throw subtasksError;
+    }
+
+    return { data: task, error: null };
+  } catch (error) {
+    console.error('Error creating task:', error);
+    return { data: null, error };
+  }
+};
+
+// Update task
+export const updateTask = async (taskId, updates) => {
+  try {
+    const dbUpdates = {
+      title: updates.title,
+      description: updates.description,
+      category: updates.category,
+      completed: updates.completed,
+      progress: updates.progress,
+    };
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .update(dbUpdates)
+      .eq('id', taskId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('Error updating task:', error);
+    return { data: null, error };
+  }
+};
+
+// Delete task (cascades to subtasks automatically)
+export const deleteTask = async (taskId) => {
+  try {
+    const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    console.error('Error deleting task:', error);
+    return { error };
+  }
+};
+
+// Toggle subtask completion
+export const toggleSubtask = async (subtaskId, completed) => {
+  try {
+    const { data, error } = await supabase
+      .from('subtasks')
+      .update({ completed })
+      .eq('id', subtaskId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('Error toggling subtask:', error);
+    return { data: null, error };
+  }
+};
+
+// Recalculate task progress based on subtasks
+export const recalculateTaskProgress = async (taskId) => {
+  try {
+    // Get all subtasks for this task
+    const { data: subtasks, error: fetchError } = await supabase
+      .from('subtasks')
+      .select('completed')
+      .eq('task_id', taskId);
+
+    if (fetchError) throw fetchError;
+
+    // Calculate progress
+    const total = subtasks.length;
+    if (total === 0) {
+      // No subtasks - progress is 0 or 100 based on task completion
+      return { progress: 0, error: null };
+    }
+
+    const completed = subtasks.filter((st) => st.completed).length;
+    const progress = Math.round((completed / total) * 100);
+
+    // Update task progress
+    const { error: updateError } = await supabase
+      .from('tasks')
+      .update({ progress })
+      .eq('id', taskId);
+
+    if (updateError) throw updateError;
+
+    return { progress, error: null };
+  } catch (error) {
+    console.error('Error recalculating progress:', error);
+    return { progress: 0, error };
+  }
+};
+```
+
+STEP 6.3: Update TaskContext to Use Supabase
+─────────────────────────────────────────────
+WHERE: src/contexts/TaskContext.js
+
+WHAT TO DO:
+Replace in-memory state with Supabase operations. This is a major refactor.
+
+KEY CHANGES:
+1. Remove useState for tasks (will come from Supabase)
+2. Add useEffect to load tasks on mount
+3. Change all CRUD functions to call taskService functions
+4. Add real-time subscriptions (optional but recommended)
+
+```javascript
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useAuth } from './AuthContext';
+import * as taskService from '../services/taskService';
+
+const TaskContext = createContext();
+
+export const TaskProvider = ({ children }) => {
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState({
+    scheduled: [],
+    anytime: [],
+    dueToday: [],
+  });
+  const [loading, setLoading] = useState(true);
+
+  // Load tasks when user logs in
+  useEffect(() => {
+    if (user) {
+      loadTasks();
+      // Optional: Set up real-time subscription
+      setupRealtimeSubscription();
+    } else {
+      // Clear tasks when user logs out
+      setTasks({ scheduled: [], anytime: [], dueToday: [] });
+      setLoading(false);
+    }
+  }, [user]);
+
+  const loadTasks = async () => {
+    setLoading(true);
+    const { data, error } = await taskService.fetchUserTasks(user.id);
+    if (data) {
+      setTasks(data);
+    }
+    setLoading(false);
+  };
+
+  const addTask = async (taskData) => {
+    const { data, error } = await taskService.createTask(user.id, taskData);
+    if (data) {
+      // Reload tasks to get updated list
+      await loadTasks();
+    }
+    return { data, error };
+  };
+
+  const updateTask = async (taskId, updates) => {
+    const { data, error } = await taskService.updateTask(taskId, updates);
+    if (data) {
+      await loadTasks();
+    }
+    return { data, error };
+  };
+
+  const deleteTask = async (taskId) => {
+    const { error } = await taskService.deleteTask(taskId);
+    if (!error) {
+      await loadTasks();
+    }
+    return { error };
+  };
+
+  const toggleTaskComplete = async (taskId) => {
+    // Find task in local state first
+    const task = findTask(taskId);
+    if (!task) return;
+
+    const { data, error } = await taskService.updateTask(taskId, {
+      completed: !task.completed,
+      progress: !task.completed ? 100 : task.originalProgress || 0,
+    });
+
+    if (data) {
+      await loadTasks();
+    }
+  };
+
+  const toggleSubtask = async (taskId, subtaskId) => {
+    // Find subtask
+    const task = findTask(taskId);
+    const subtask = task?.subTasks.find((st) => st.id === subtaskId);
+    if (!subtask) return;
+
+    const { data, error } = await taskService.toggleSubtask(
+      subtaskId,
+      !subtask.completed
+    );
+
+    if (data) {
+      // Recalculate task progress
+      await taskService.recalculateTaskProgress(taskId);
+      await loadTasks();
+    }
+  };
+
+  const findTask = (taskId) => {
+    for (const category of Object.values(tasks)) {
+      const task = category.find((t) => t.id === taskId);
+      if (task) return task;
+    }
+    return null;
+  };
+
+  const setupRealtimeSubscription = () => {
+    // Subscribe to task changes (updates in real-time)
+    const subscription = supabase
+      .channel('tasks-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'tasks',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Task changed:', payload);
+          loadTasks(); // Reload tasks on any change
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  };
+
+  const value = {
+    tasks,
+    loading,
+    addTask,
+    updateTask,
+    deleteTask,
+    toggleTaskComplete,
+    toggleSubtask,
+    findTask,
+  };
+
+  return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>;
+};
+
+export const useTasks = () => {
+  const context = useContext(TaskContext);
+  if (!context) {
+    throw new Error('useTasks must be used within TaskProvider');
+  }
+  return context;
+};
+```
+
+IMPORTANT NOTES:
+1. This is a simplified version - you may need to preserve some existing logic
+2. Real-time subscriptions are optional but provide live updates
+3. Consider adding error handling in UI (show alerts on errors)
+
+STEP 6.4: Handle Loading States in UI
+──────────────────────────────────────
+WHERE: src/screens/TasksScreen.js (and other screens using tasks)
+
+WHAT TO DO:
+Show loading indicator while tasks are being fetched:
+
+```javascript
+export default function TasksScreen() {
+  const { tasks, loading } = useTasks();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.textPrimary} />
+      </View>
+    );
+  }
+
+  // Render tasks normally
+  return (
+    // ... your existing UI
+  );
+}
+```
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 7: CREATE USER PROFILE ON FIRST SIGN-IN
+────────────────────────────────────────────────────────────────────────────────
+
+When a user signs in with Google for the first time, we need to create their
+profile in the user_profiles table.
+
+STEP 7.1: Create Profile Service
+─────────────────────────────────
+WHERE: Create new file: src/services/profileService.js
+
+```javascript
+import { supabase } from '../config/supabase';
+
+// Check if user profile exists
+export const checkProfileExists = async (userId) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('id')
+      .eq('id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      // PGRST116 = no rows returned (expected for new users)
+      throw error;
+    }
+
+    return { exists: !!data, error: null };
+  } catch (error) {
+    console.error('Error checking profile:', error);
+    return { exists: false, error };
+  }
+};
+
+// Create user profile
+export const createUserProfile = async (user) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .insert([
+        {
+          id: user.id,
+          name: user.user_metadata?.full_name || user.email,
+          avatar_url: user.user_metadata?.avatar_url || null,
+          google_id: user.user_metadata?.sub || null,
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error('Error creating profile:', error);
+    return { data: null, error };
+  }
+};
+```
+
+STEP 7.2: Update AuthContext to Create Profile on First Sign-In
+────────────────────────────────────────────────────────────────
+WHERE: src/contexts/AuthContext.js
+
+WHAT TO DO:
+Add profile creation logic to onAuthStateChange:
+
+```javascript
+import { checkProfileExists, createUserProfile } from '../services/profileService';
+
+// Inside AuthProvider component, update onAuthStateChange:
+useEffect(() => {
+  checkSession();
+
+  const { data: authListener } = supabase.auth.onAuthStateChange(
+    async (event, session) => {
+      console.log('Auth event:', event);
+      setSession(session);
+      setUser(session?.user ?? null);
+
+      // Create profile on first sign-in
+      if (event === 'SIGNED_IN' && session?.user) {
+        const { exists } = await checkProfileExists(session.user.id);
+        if (!exists) {
+          await createUserProfile(session.user);
+        }
+      }
+
+      setLoading(false);
+    }
+  );
+
+  return () => {
+    authListener?.subscription?.unsubscribe();
+  };
+}, []);
+```
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 8: ADD LOGOUT FUNCTIONALITY
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 8.1: Add Logout Button to UI
+──────────────────────────────────
+WHERE: Choose appropriate location (e.g., MarketplaceScreen as temporary profile)
+
+WHAT TO DO:
+```javascript
+import { useAuth } from '../contexts/AuthContext';
+
+export default function MarketplaceScreen() {
+  const { user, signOut } = useAuth();
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Profile</Text>
+      <Text>Logged in as: {user?.email}</Text>
+
+      <TouchableOpacity style={styles.logoutButton} onPress={signOut}>
+        <Text style={styles.logoutText}>Sign Out</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+```
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 9: TESTING
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 9.1: Create Development Build
+───────────────────────────────────
+WHERE: Terminal
+
+WHAT TO DO:
+```bash
+# For Android
+npx expo run:android
+
+# For iOS
+npx expo run:ios
+```
+
+IMPORTANT: Expo Go will NOT work for Google Sign-In. You MUST use development build.
+
+STEP 9.2: Test Authentication Flow
+───────────────────────────────────
+WHAT TO TEST:
+1. Open app → Should show LoginScreen
+2. Tap "Sign in with Google" → Browser opens
+3. Sign in with Google account
+4. Redirected back to app
+5. Should see main app (TasksScreen)
+
+STEP 9.3: Test Task Persistence
+────────────────────────────────
+WHAT TO TEST:
+1. Create a new task
+2. Close the app completely
+3. Reopen the app
+4. Task should still be there (loaded from Supabase)
+
+STEP 9.4: Test Multi-Device Sync
+─────────────────────────────────
+WHAT TO TEST (if you have multiple devices):
+1. Sign in on Device A
+2. Create a task
+3. Sign in on Device B with same account
+4. Task should appear on Device B
+
+STEP 9.5: Test Row Level Security
+──────────────────────────────────
+WHAT TO TEST:
+1. Sign in with Account A → Create tasks
+2. Sign out
+3. Sign in with Account B
+4. Should NOT see Account A's tasks (RLS working correctly)
+
+STEP 9.6: Verify in Supabase Dashboard
+───────────────────────────────────────
+WHERE: Supabase Dashboard → Table Editor
+
+WHAT TO VERIFY:
+1. user_profiles table has your user record
+2. tasks table has your tasks with correct user_id
+3. subtasks table has subtasks linked to correct task_id
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 10: ERROR HANDLING & POLISH
+────────────────────────────────────────────────────────────────────────────────
+
+STEP 10.1: Add Error States in UI
+──────────────────────────────────
+WHAT TO DO:
+- Show error messages when task creation fails
+- Show retry buttons for network errors
+- Handle offline state gracefully
+
+Example:
+```javascript
+const handleAddTask = async (taskData) => {
+  const { data, error } = await addTask(taskData);
+  if (error) {
+    Alert.alert('Error', 'Failed to create task. Please try again.');
+  } else {
+    navigation.goBack();
+  }
+};
+```
+
+STEP 10.2: Add Loading States for Better UX
+────────────────────────────────────────────
+- Show ActivityIndicator while tasks are loading
+- Disable buttons while operations are in progress
+- Show skeleton screens for better perceived performance
+
+STEP 10.3: Handle Edge Cases
+─────────────────────────────
+1. Network timeout: Retry logic
+2. Session expiry: Refresh token automatically (Supabase handles this)
+3. Concurrent edits: Last write wins (or implement conflict resolution)
+
+────────────────────────────────────────────────────────────────────────────────
+PHASE 11: FUTURE ENHANCEMENTS (Optional)
+────────────────────────────────────────────────────────────────────────────────
+
+These can be implemented later:
+
+1. OFFLINE SUPPORT WITH POWERSYNC
+   - Install PowerSync SDK
+   - Configure sync with Supabase
+   - Users can work offline, auto-sync when online
+
+2. PUSH NOTIFICATIONS
+   - Remind users about upcoming tasks
+   - Notify when shared project is updated
+
+3. PROJECT SHARING
+   - Use projects and project_shares tables
+   - Implement RLS for shared projects
+   - Real-time updates when collaborators edit
+
+4. PROFILE CUSTOMIZATION
+   - Let users upload avatar
+   - Edit display name
+   - Theme preferences
+
+5. MARKETPLACE IMPLEMENTATION
+   - Create marketplace_items table
+   - List/buy/sell functionality
+   - Payment integration (Stripe)
+
+================================================================================
+COMMON ISSUES & TROUBLESHOOTING
+================================================================================
+
+ISSUE 1: "Google Sign-In button does nothing"
+SOLUTION:
+- Make sure you're using development build (not Expo Go)
+- Check OAuth credentials are correct in Google Console and Supabase
+- Verify redirect URL matches in both places
+
+ISSUE 2: "Tasks not appearing after creation"
+SOLUTION:
+- Check Supabase Table Editor - are tasks being created?
+- Verify RLS policies allow user to SELECT their own tasks
+- Check console for errors from Supabase
+
+ISSUE 3: "User can see other users' tasks"
+SOLUTION:
+- RLS policies not working correctly
+- Re-run RLS policy SQL from Phase 1, Step 1.3
+- Verify policies in Supabase Dashboard → Authentication → Policies
+
+ISSUE 4: "Session not persisting (logged out on app restart)"
+SOLUTION:
+- Make sure expo-secure-store is installed
+- Verify SecureStore adapter is configured in supabase.js
+- Check autoRefreshToken and persistSession are set to true
+
+ISSUE 5: "Development build fails to compile"
+SOLUTION:
+- Clear cache: npx expo start -c
+- Delete node_modules and reinstall: rm -rf node_modules && npm install
+- Rebuild: npx expo prebuild --clean
+
+ISSUE 6: "Can't connect to Supabase (network error)"
+SOLUTION:
+- Check Supabase project is not paused (free tier pauses after inactivity)
+- Verify SUPABASE_URL and SUPABASE_ANON_KEY are correct
+- Check internet connection
+
+================================================================================
+SECURITY BEST PRACTICES
+================================================================================
+
+1. NEVER commit Supabase keys to public Git repos
+   - Use .env files with environment variables
+   - Add .env to .gitignore
+
+2. ALWAYS use RLS policies
+   - Never trust client-side security
+   - Database enforces security via RLS
+
+3. Use anon key in mobile app (NOT service_role key)
+   - Service role bypasses RLS - only use in secure backend
+
+4. Validate user input on client AND server
+   - Prevent SQL injection (Supabase handles this)
+   - Check required fields before submission
+
+5. Keep dependencies updated
+   - Regularly update Supabase client
+   - Update Expo and React Native
+
+6. Rate limit authentication attempts
+   - Supabase has built-in rate limiting
+   - Consider additional client-side throttling
+
+================================================================================
+RESOURCES & DOCUMENTATION
+================================================================================
+
+OFFICIAL DOCS:
+- Supabase: https://supabase.com/docs
+- Supabase Auth: https://supabase.com/docs/guides/auth
+- Expo Auth Session: https://docs.expo.dev/guides/authentication/
+- React Native: https://reactnative.dev/
+
+TUTORIALS:
+- Supabase + Expo: https://supabase.com/docs/guides/getting-started/tutorials/with-expo-react-native
+- Google OAuth Setup: https://supabase.com/docs/guides/auth/social-login/auth-google
+
+COMMUNITY:
+- Supabase Discord: https://discord.supabase.com
+- Expo Discord: https://chat.expo.dev
+- Stack Overflow: Tag questions with [supabase] [expo] [react-native]
+
+================================================================================
+SUMMARY CHECKLIST
+================================================================================
+
+Before you start coding, make sure you have:
+☐ Google Cloud project with OAuth credentials
+☐ Supabase account and project created
+☐ Supabase URL and anon key saved
+☐ Understanding of OAuth flow
+☐ Understanding of RLS (Row Level Security)
+☐ Development build environment set up
+
+Phase 1 - Backend Setup:
+☐ Google OAuth configured in Supabase
+☐ Database tables created (user_profiles, tasks, subtasks)
+☐ RLS policies enabled and configured
+☐ Auto-update trigger created
+
+Phase 2 - Install Dependencies:
+☐ @supabase/supabase-js installed
+☐ expo-auth-session installed
+☐ expo-crypto installed
+☐ expo-web-browser installed
+☐ expo-secure-store installed
+☐ react-native-url-polyfill installed
+
+Phase 3 - Configuration:
+☐ src/config/supabase.js created with correct credentials
+☐ SecureStore adapter configured
+
+Phase 4 - Authentication:
+☐ AuthContext created
+☐ App.js wrapped with AuthProvider
+☐ Auth state management working
+
+Phase 5 - Login UI:
+☐ LoginScreen created
+☐ Google Sign-In button working
+☐ AppNavigator shows LoginScreen when not authenticated
+☐ Deep linking configured in app.json
+
+Phase 6 - Data Migration:
+☐ taskService.js created with all CRUD operations
+☐ TaskContext updated to use Supabase
+☐ Loading states handled in UI
+
+Phase 7 - Profile Creation:
+☐ profileService.js created
+☐ Profile auto-created on first sign-in
+
+Phase 8 - Logout:
+☐ Logout button added to UI
+☐ Sign-out functionality working
+
+Phase 9 - Testing:
+☐ Development build created and running
+☐ Google Sign-In flow works end-to-end
+☐ Tasks persist across app restarts
+☐ RLS prevents seeing other users' tasks
+☐ Data visible in Supabase dashboard
+
+Phase 10 - Polish:
+☐ Error handling implemented
+☐ Loading states look good
+☐ Edge cases handled
+
+================================================================================
+ESTIMATED TIME TO COMPLETE
+================================================================================
+
+For a developer familiar with React Native and databases:
+- Phase 0-1 (Setup): 2-3 hours
+- Phase 2-5 (Auth): 3-4 hours
+- Phase 6 (Data Migration): 4-6 hours (most complex)
+- Phase 7-8 (Profile & Logout): 1 hour
+- Phase 9-10 (Testing & Polish): 2-3 hours
+
+TOTAL: 12-17 hours over 2-3 days
+
+For a junior developer or first time with these technologies:
+Add 50-100% more time for learning and troubleshooting.
+
+================================================================================
+END OF GUIDE
+================================================================================
+
+This guide should give you everything needed to implement authentication and
+database storage for TasklyApp. Take it one phase at a time, test thoroughly
+after each phase, and don't hesitate to consult the official documentation
+when you get stuck.
+
+Good luck with your implementation!

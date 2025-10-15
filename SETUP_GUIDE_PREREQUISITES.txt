@@ -1,0 +1,735 @@
+================================================================================
+TASKLY APP - PREREQUISITES SETUP GUIDE
+================================================================================
+
+This guide walks you through the "Before You Start Coding" checklist from the
+main implementation guide. Follow each step carefully - these are the foundation
+for everything else.
+
+By the end of this guide, you will have:
+1. A Google Cloud project with OAuth credentials
+2. A Supabase account and project
+3. Understanding of key concepts (OAuth, RLS, Development Builds)
+
+ESTIMATED TIME: 1-2 hours
+
+================================================================================
+CONCEPT 1: UNDERSTANDING OAUTH FLOW
+================================================================================
+
+WHAT IS OAUTH?
+--------------
+OAuth is a way to let users sign in to your app using their Google (or other)
+account, without you having to handle passwords.
+
+HOW IT WORKS (SIMPLIFIED):
+1. User clicks "Sign in with Google" in your app
+2. Your app opens a browser to Google's sign-in page
+3. User signs in with their Google account
+4. Google asks: "Do you want to let TasklyApp access your basic info?"
+5. User says "Yes"
+6. Google gives your app a special "token" (like a key)
+7. Your app uses this token to prove the user is signed in
+8. Your app can now access the user's email, name, and profile picture
+
+WHY USE OAUTH?
+- You don't store passwords (more secure)
+- Users trust Google's sign-in
+- Faster sign-up (no filling out forms)
+- One-click sign-in
+
+KEY TERMS:
+- OAuth Provider: Google (the service that verifies the user)
+- Client ID: A unique identifier for your app (like a username)
+- Client Secret: A password for your app (keep it secret!)
+- Redirect URI: Where Google sends the user after they sign in
+- Access Token: The "key" that proves the user is signed in
+
+================================================================================
+CONCEPT 2: UNDERSTANDING ROW LEVEL SECURITY (RLS)
+================================================================================
+
+WHAT IS RLS?
+------------
+Row Level Security is a database feature that ensures users can ONLY see and
+modify their own data.
+
+EXAMPLE WITHOUT RLS (BAD):
+- User A creates a task: "Buy groceries"
+- User B signs in
+- User B can see User A's task (SECURITY PROBLEM!)
+
+EXAMPLE WITH RLS (GOOD):
+- User A creates a task: "Buy groceries"
+- Database checks: "Does this task belong to User A?" → YES → User A can see it
+- User B signs in
+- Database checks: "Does this task belong to User B?" → NO → User B CANNOT see it
+
+HOW IT WORKS:
+RLS uses "policies" (rules) that run at the database level. Even if you
+accidentally write code that tries to fetch all users' tasks, the database
+will only return the current user's tasks.
+
+EXAMPLE POLICY:
+"Users can only SELECT tasks WHERE user_id = auth.uid()"
+
+Translation: "Users can only read tasks where the user_id column matches their
+own user ID"
+
+WHY IT'S IMPORTANT:
+- Security is enforced at the database level (can't be bypassed)
+- Even if your app code has bugs, users can't access others' data
+- Required for multi-user apps
+
+================================================================================
+CONCEPT 3: UNDERSTANDING EXPO DEVELOPMENT BUILDS
+================================================================================
+
+WHAT IS EXPO GO?
+----------------
+Expo Go is an app you download on your phone to test React Native apps quickly.
+It's great for simple apps, but has limitations.
+
+LIMITATIONS OF EXPO GO:
+- Cannot use native code (like Google Sign-In libraries)
+- Cannot customize app icons/splash screens fully
+- Cannot use certain packages
+
+WHAT IS A DEVELOPMENT BUILD?
+----------------------------
+A Development Build is a custom version of your app that includes native code.
+It's like a personalized Expo Go built specifically for your app.
+
+DIFFERENCES:
+┌─────────────────────────────────────────────────────────────────┐
+│                  Expo Go    vs    Development Build             │
+├─────────────────────────────────────────────────────────────────┤
+│ Setup Time       Instant          5-10 minutes                  │
+│ Native Code      ❌ No            ✅ Yes                         │
+│ Google Sign-In   ❌ No            ✅ Yes                         │
+│ Custom Icons     ❌ Limited       ✅ Full control                │
+│ File Size        Small            Larger                        │
+│ Testing Speed    Fast             Fast (after initial build)    │
+└─────────────────────────────────────────────────────────────────┘
+
+HOW TO CREATE A DEVELOPMENT BUILD:
+We'll use the command: npx expo run:android (or npx expo run:ios)
+
+This:
+1. Generates native Android/iOS code
+2. Installs all native dependencies
+3. Builds and runs your app on a device/emulator
+
+WHY YOU NEED IT:
+Google Sign-In requires native code, so Expo Go won't work for this project.
+
+WHEN TO USE WHICH:
+- Expo Go: Quick prototypes, learning React Native
+- Development Build: Production apps, apps needing native features
+
+================================================================================
+STEP-BY-STEP SETUP INSTRUCTIONS
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 1: CREATE GOOGLE CLOUD PROJECT & OAUTH CREDENTIALS
+────────────────────────────────────────────────────────────────────────────────
+
+This step sets up Google Sign-In for your app.
+
+PART A: CREATE GOOGLE CLOUD PROJECT
+────────────────────────────────────
+
+1. Open your web browser and go to:
+   https://console.cloud.google.com/
+
+2. Sign in with your Google account
+   - Use any Gmail account
+   - This will be your developer account
+
+3. At the top of the page, click the project dropdown
+   - It might say "Select a project" or show an existing project name
+   - Click "NEW PROJECT"
+
+4. Fill out the project creation form:
+   - Project name: "TasklyApp" (or anything you prefer)
+   - Organization: Leave as "No organization" (unless you have one)
+   - Location: Leave as default
+   - Click "CREATE"
+
+5. Wait 10-30 seconds for project creation
+
+6. You'll see a notification when it's ready
+   - Click "SELECT PROJECT" in the notification
+   - OR use the project dropdown at the top and select "TasklyApp"
+
+✅ CHECKPOINT: You should see "TasklyApp" in the top bar of Google Cloud Console
+
+
+PART B: ENABLE GOOGLE+ API (REQUIRED FOR SIGN-IN)
+──────────────────────────────────────────────────
+
+1. In Google Cloud Console, make sure "TasklyApp" is selected
+
+2. In the left sidebar, hover over "APIs & Services"
+   - Click "Enabled APIs & services"
+
+3. Click "+ ENABLE APIS AND SERVICES" (blue button at top)
+
+4. In the search box, type: "Google+ API"
+
+5. Click on "Google+ API" in the results
+
+6. Click the blue "ENABLE" button
+
+7. Wait for it to enable (5-10 seconds)
+
+✅ CHECKPOINT: You should see "API enabled" message
+
+
+PART C: CONFIGURE OAUTH CONSENT SCREEN
+───────────────────────────────────────
+
+This is the screen users see when they sign in with Google.
+
+1. In the left sidebar, click "APIs & Services" → "OAuth consent screen"
+
+2. Choose user type:
+   - Select "External" (allows anyone with a Google account to sign in)
+   - Click "CREATE"
+
+3. Fill out the OAuth consent screen form:
+
+   APP INFORMATION:
+   - App name: "Taskly" (users will see this)
+   - User support email: Your email address (select from dropdown)
+   - App logo: SKIP for now (optional)
+
+   APP DOMAIN (scroll down):
+   - Application home page: Leave blank for now
+   - Application privacy policy link: Leave blank for now
+   - Application terms of service link: Leave blank for now
+
+   DEVELOPER CONTACT INFORMATION:
+   - Email addresses: Your email address
+
+4. Click "SAVE AND CONTINUE"
+
+5. On the "Scopes" page:
+   - Click "ADD OR REMOVE SCOPES"
+   - In the filter box, type: "email"
+   - Check these scopes:
+     ☑ .../auth/userinfo.email (View your email address)
+     ☑ .../auth/userinfo.profile (See your personal info)
+     ☑ openid
+   - Click "UPDATE"
+   - Click "SAVE AND CONTINUE"
+
+6. On the "Test users" page:
+   - Click "+ ADD USERS"
+   - Enter your email address (the one you'll use to test)
+   - Click "ADD"
+   - Click "SAVE AND CONTINUE"
+
+7. On the "Summary" page:
+   - Review everything
+   - Click "BACK TO DASHBOARD"
+
+✅ CHECKPOINT: You should see "Publishing status: Testing" on the dashboard
+
+
+PART D: CREATE OAUTH CLIENT IDS
+────────────────────────────────
+
+You need to create credentials for each platform (Web, Android, iOS).
+
+STEP D1: CREATE WEB APPLICATION CLIENT
+───────────────────────────────────────
+
+1. In the left sidebar, click "APIs & Services" → "Credentials"
+
+2. Click "+ CREATE CREDENTIALS" at the top
+
+3. Select "OAuth client ID"
+
+4. Application type: Select "Web application"
+
+5. Fill out the form:
+   - Name: "Taskly Web Client" (for Supabase)
+
+   - Authorized JavaScript origins:
+     Click "+ ADD URI"
+     Enter: https://YOUR_PROJECT_ID.supabase.co
+
+     ⚠️ WAIT: You don't have your Supabase URL yet!
+     We'll come back to this after creating Supabase project.
+     For now, just enter: https://placeholder.supabase.co
+
+   - Authorized redirect URIs:
+     Click "+ ADD URI"
+     Enter: https://YOUR_PROJECT_ID.supabase.co/auth/v1/callback
+
+     ⚠️ WAIT: Same as above - use placeholder for now:
+     https://placeholder.supabase.co/auth/v1/callback
+
+6. Click "CREATE"
+
+7. A popup appears with your credentials:
+   - Client ID: Something like "123456789-abc123.apps.googleusercontent.com"
+   - Client Secret: Something like "GOCSPX-abcd1234..."
+
+   ⚠️ IMPORTANT: Copy these somewhere safe!
+   Create a text file called "oauth-credentials.txt" and paste:
+
+   ```
+   WEB CLIENT:
+   Client ID: [paste your Client ID here]
+   Client Secret: [paste your Client Secret here]
+   ```
+
+8. Click "OK" to close the popup
+
+✅ CHECKPOINT: You should see "Taskly Web Client" in the OAuth 2.0 Client IDs list
+
+
+STEP D2: CREATE ANDROID CLIENT (IF TARGETING ANDROID)
+──────────────────────────────────────────────────────
+
+1. Still in "Credentials" page, click "+ CREATE CREDENTIALS" again
+
+2. Select "OAuth client ID"
+
+3. Application type: Select "Android"
+
+4. Fill out the form:
+   - Name: "Taskly Android Client"
+
+   - Package name:
+     This is your app's unique identifier.
+     Open your project's app.json file and look for:
+     "package" or "android" → "package"
+
+     If you don't have one, use: com.yourname.tasklyapp
+     Example: com.hamza.tasklyapp
+
+   - SHA-1 certificate fingerprint:
+     This proves your app is legitimate.
+
+     HOW TO GET SHA-1:
+
+     A) Open a terminal/command prompt
+
+     B) Run this command:
+
+     FOR WINDOWS:
+     keytool -keystore %USERPROFILE%\.android\debug.keystore -list -v -alias androiddebugkey -storepass android -keypass android
+
+     FOR MAC/LINUX:
+     keytool -keystore ~/.android/debug.keystore -list -v -alias androiddebugkey -storepass android -keypass android
+
+     C) Look for "SHA1:" in the output
+     Example: SHA1: A1:B2:C3:D4:E5:F6:...
+
+     D) Copy everything after "SHA1: " (the long string of letters/numbers)
+
+     E) Paste it in the SHA-1 field
+
+5. Click "CREATE"
+
+6. Save the Client ID to your oauth-credentials.txt file:
+   ```
+   ANDROID CLIENT:
+   Client ID: [paste here]
+   ```
+
+✅ CHECKPOINT: You should see "Taskly Android Client" in the credentials list
+
+
+STEP D3: CREATE IOS CLIENT (IF TARGETING iOS - OPTIONAL)
+─────────────────────────────────────────────────────────
+
+⚠️ NOTE: Skip this if you're only building for Android.
+
+1. Click "+ CREATE CREDENTIALS" → "OAuth client ID"
+
+2. Application type: Select "iOS"
+
+3. Fill out the form:
+   - Name: "Taskly iOS Client"
+
+   - Bundle ID:
+     Open your app.json file and look for:
+     "ios" → "bundleIdentifier"
+
+     If you don't have one, use: com.yourname.tasklyapp
+     Example: com.hamza.tasklyapp
+
+4. Click "CREATE"
+
+5. Save the Client ID to your oauth-credentials.txt file:
+   ```
+   IOS CLIENT:
+   Client ID: [paste here]
+   ```
+
+✅ CHECKPOINT: You should see "Taskly iOS Client" in the credentials list
+
+
+SUMMARY OF WHAT YOU HAVE NOW:
+- ✅ Google Cloud project created
+- ✅ OAuth consent screen configured
+- ✅ Web client credentials (for Supabase)
+- ✅ Android client credentials (for your app)
+- ✅ All credentials saved in oauth-credentials.txt
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 2: CREATE SUPABASE ACCOUNT & PROJECT
+────────────────────────────────────────────────────────────────────────────────
+
+Supabase is your backend - it handles authentication and stores all your app data.
+
+PART A: CREATE SUPABASE ACCOUNT
+────────────────────────────────
+
+1. Open your web browser and go to:
+   https://supabase.com
+
+2. Click "Start your project" or "Sign In" (top right)
+
+3. Sign up using one of these options:
+   - GitHub (recommended - easy and free)
+   - Google
+   - Email
+
+4. If using GitHub:
+   - Click "Continue with GitHub"
+   - Authorize Supabase to access your GitHub account
+   - You'll be redirected back to Supabase
+
+5. You'll land on the Supabase dashboard
+
+✅ CHECKPOINT: You should see "Create a new project" or "All Projects" page
+
+
+PART B: CREATE YOUR FIRST PROJECT
+──────────────────────────────────
+
+1. Click "New project" (green button)
+
+2. If asked, create an organization first:
+   - Organization name: "Personal" or your name
+   - Click "Create organization"
+
+3. Fill out the project creation form:
+
+   PROJECT NAME:
+   - Enter: "taskly-app" (lowercase, no spaces)
+
+   DATABASE PASSWORD:
+   - Click the "Generate a password" button
+   - ⚠️ CRITICAL: Copy this password immediately!
+   - Save it to a file called "supabase-credentials.txt":
+     ```
+     PROJECT: taskly-app
+     DATABASE PASSWORD: [paste here]
+     ```
+   - You'll need this password later (Supabase won't show it again!)
+
+   REGION:
+   - Choose the region closest to your target users
+   - Examples:
+     * East US (us-east-1) - for US East Coast
+     * West US (us-west-1) - for US West Coast
+     * Europe (eu-west-1) - for Europe
+     * Southeast Asia (ap-southeast-1) - for Asia
+
+   PRICING PLAN:
+   - Select "Free" (the default)
+   - Free tier includes:
+     * 500 MB database storage
+     * 1 GB file storage
+     * 2 GB bandwidth per month
+     * Up to 50,000 monthly active users
+     * This is MORE than enough to start!
+
+4. Click "Create new project"
+
+5. Wait 2-3 minutes while Supabase sets up your database
+   - You'll see a progress indicator
+   - Don't close this page!
+
+6. When complete, you'll see your project dashboard
+
+✅ CHECKPOINT: You should see the Supabase project dashboard with a sidebar
+
+
+PART C: GET YOUR PROJECT CREDENTIALS
+─────────────────────────────────────
+
+These credentials connect your React Native app to Supabase.
+
+1. In your Supabase project dashboard, look at the left sidebar
+
+2. Click on "Project Settings" (gear icon at the bottom)
+
+3. In the settings menu, click "API"
+
+4. You'll see several important values. Copy these to your supabase-credentials.txt file:
+
+   PROJECT URL:
+   - Look for "Project URL"
+   - Something like: https://abcdefghijklmnop.supabase.co
+   - Copy the entire URL
+   - Add to your file:
+     ```
+     PROJECT URL: [paste here]
+     ```
+
+   PROJECT API KEYS:
+   - Look for "Project API keys" section
+   - You'll see two keys:
+
+   a) anon / public key:
+      - This is safe to use in your mobile app
+      - Click the copy icon
+      - Add to your file:
+        ```
+        ANON KEY (public): [paste here]
+        ```
+
+   b) service_role key:
+      - ⚠️ WARNING: Never use this in your mobile app!
+      - This key bypasses all security rules
+      - Only use on a secure backend server
+      - Copy it for future use (optional):
+        ```
+        SERVICE ROLE KEY (secret - backend only): [paste here]
+        ```
+
+5. Your supabase-credentials.txt file should now look like this:
+   ```
+   PROJECT: taskly-app
+   DATABASE PASSWORD: [your generated password]
+   PROJECT URL: https://abcdefghijklmnop.supabase.co
+   ANON KEY (public): [your anon key]
+   SERVICE ROLE KEY (secret - backend only): [your service role key]
+   ```
+
+✅ CHECKPOINT: You have all 4 credentials saved
+
+
+PART D: UPDATE GOOGLE OAUTH WITH SUPABASE URL
+──────────────────────────────────────────────
+
+Remember we used placeholder URLs in Google Cloud? Now we fix them.
+
+1. Go back to Google Cloud Console:
+   https://console.cloud.google.com/
+
+2. Make sure "TasklyApp" project is selected
+
+3. Go to "APIs & Services" → "Credentials"
+
+4. Under "OAuth 2.0 Client IDs", find "Taskly Web Client"
+
+5. Click on "Taskly Web Client" to edit it
+
+6. Update the URLs:
+
+   AUTHORIZED JAVASCRIPT ORIGINS:
+   - Remove: https://placeholder.supabase.co
+   - Add: [Your actual Supabase URL]
+   - Example: https://abcdefghijklmnop.supabase.co
+
+   AUTHORIZED REDIRECT URIS:
+   - Remove: https://placeholder.supabase.co/auth/v1/callback
+   - Add: [Your actual Supabase URL]/auth/v1/callback
+   - Example: https://abcdefghijklmnop.supabase.co/auth/v1/callback
+
+7. Click "SAVE"
+
+✅ CHECKPOINT: Your Google OAuth client now has the correct Supabase URLs
+
+
+PART E: CONFIGURE GOOGLE AUTH IN SUPABASE
+──────────────────────────────────────────
+
+Now we tell Supabase about your Google OAuth credentials.
+
+1. Go back to your Supabase project dashboard
+
+2. In the left sidebar, click "Authentication" (key icon)
+
+3. Click on "Providers" in the sub-menu
+
+4. Scroll down and find "Google"
+
+5. Click on "Google" to expand it
+
+6. Toggle "Enable Sign in with Google" to ON (should turn green)
+
+7. Fill in the configuration:
+
+   CLIENT ID (for OAuth):
+   - Get this from your oauth-credentials.txt file
+   - Copy the "WEB CLIENT → Client ID"
+   - Paste it here
+
+   CLIENT SECRET (for OAuth):
+   - Get this from your oauth-credentials.txt file
+   - Copy the "WEB CLIENT → Client Secret"
+   - Paste it here
+
+   REDIRECT URL:
+   - This should already be filled in automatically
+   - It should match: https://[your-project].supabase.co/auth/v1/callback
+   - Don't change it!
+
+8. Click "Save" at the bottom
+
+9. You should see a green success message
+
+✅ CHECKPOINT: Google sign-in is now configured in Supabase!
+
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 3: VERIFY EVERYTHING IS SET UP CORRECTLY
+────────────────────────────────────────────────────────────────────────────────
+
+Let's make sure all the pieces are connected properly.
+
+CHECKLIST:
+☐ Google Cloud project created
+☐ OAuth consent screen configured
+☐ Web OAuth client created (for Supabase)
+☐ Android OAuth client created (with SHA-1)
+☐ iOS OAuth client created (if targeting iOS)
+☐ All Google credentials saved in oauth-credentials.txt
+☐ Supabase account created
+☐ Supabase project created (taskly-app)
+☐ Database password saved
+☐ Project URL saved
+☐ Anon key saved
+☐ Google OAuth URLs updated with real Supabase URL
+☐ Google provider enabled in Supabase
+☐ Google Client ID & Secret added to Supabase
+
+If you checked ALL boxes, you're ready to start coding! 🎉
+
+
+WHAT YOU HAVE NOW:
+──────────────────
+
+Two files with all your credentials:
+
+1. oauth-credentials.txt:
+   - Google Web Client ID & Secret
+   - Google Android Client ID
+   - Google iOS Client ID (if applicable)
+
+2. supabase-credentials.txt:
+   - Database password
+   - Project URL
+   - Anon key
+   - Service role key
+
+⚠️ SECURITY REMINDER:
+- Keep these files PRIVATE
+- Never commit them to Git
+- Never share them publicly
+- Never post them in forums/Discord
+- If you accidentally expose them, regenerate new ones immediately
+
+
+────────────────────────────────────────────────────────────────────────────────
+TROUBLESHOOTING COMMON ISSUES
+────────────────────────────────────────────────────────────────────────────────
+
+ISSUE: "Can't find keytool command"
+SOLUTION:
+- You need Java Development Kit (JDK) installed
+- Download from: https://www.oracle.com/java/technologies/downloads/
+- Or use Android Studio's JDK (it's included)
+- On Windows, add to PATH: C:\Program Files\Java\jdk-XX\bin
+- On Mac: JDK is usually pre-installed
+
+ISSUE: "Google Cloud Console says 'Quota exceeded'"
+SOLUTION:
+- Google has rate limits on free tier
+- Wait 24 hours and try again
+- Or enable billing (you won't be charged unless you exceed free tier)
+
+ISSUE: "Supabase project creation fails"
+SOLUTION:
+- Try a different project name (must be unique across all Supabase)
+- Try a different region
+- Check your internet connection
+- Wait a few minutes and try again
+
+ISSUE: "Can't find app.json or package name"
+SOLUTION:
+- Make sure you're in your project root directory
+- Look for app.json file
+- If it doesn't exist, you may be in the wrong folder
+- For package name, you can choose any reverse domain format:
+  com.[yourname].[appname]
+  Example: com.john.tasklyapp
+
+ISSUE: "Lost my database password"
+SOLUTION:
+- You can reset it in Supabase
+- Go to Project Settings → Database → Reset database password
+- ⚠️ This will disconnect any existing connections
+- Update your credentials file with the new password
+
+ISSUE: "OAuth redirect URLs don't match"
+SOLUTION:
+- Make sure the URLs in Google Cloud match EXACTLY with Supabase
+- No trailing slashes
+- Use HTTPS (not HTTP)
+- Check for typos
+- Format should be: https://[project-id].supabase.co/auth/v1/callback
+
+────────────────────────────────────────────────────────────────────────────────
+NEXT STEPS
+────────────────────────────────────────────────────────────────────────────────
+
+You're now ready to start the actual implementation!
+
+Go back to the main guide: AUTHENTICATION_AND_DATABASE_IMPLEMENTATION_GUIDE.txt
+
+You can now start with:
+- Phase 1: Configure Supabase Backend (Database Setup)
+- Phase 2: Install Dependencies
+
+The hard setup work is done. From here, it's just coding! 🚀
+
+────────────────────────────────────────────────────────────────────────────────
+QUICK REFERENCE
+────────────────────────────────────────────────────────────────────────────────
+
+GOOGLE CLOUD CONSOLE:
+https://console.cloud.google.com/
+
+SUPABASE DASHBOARD:
+https://app.supabase.com/
+
+YOUR PROJECT CREDENTIALS:
+(Saved in oauth-credentials.txt and supabase-credentials.txt)
+
+USEFUL COMMANDS:
+- Get Android SHA-1 (Windows):
+  keytool -keystore %USERPROFILE%\.android\debug.keystore -list -v -alias androiddebugkey -storepass android -keypass android
+
+- Get Android SHA-1 (Mac/Linux):
+  keytool -keystore ~/.android/debug.keystore -list -v -alias androiddebugkey -storepass android -keypass android
+
+================================================================================
+END OF PREREQUISITES GUIDE
+================================================================================
+
+You did it! All the boring setup is complete. Now the fun part begins - building
+your app with authentication and database storage.
+
+If you got stuck anywhere, don't worry - these setup steps can be confusing the
+first time. Take a break, then try again. You've got this! 💪
